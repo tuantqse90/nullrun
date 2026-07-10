@@ -113,7 +113,12 @@ enum Fmt {
     }
 
     static func time(_ seconds: Int) -> String {
-        String(format: "%02d:%02d", seconds / 60, seconds % 60)
+        // h:mm:ss once past an hour, else mm:ss — a 75-minute run must not
+        // render as "75:12".
+        if seconds >= 3600 {
+            return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+        }
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
     /// Pace seconds/km → 7'51"

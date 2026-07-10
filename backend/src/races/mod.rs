@@ -35,8 +35,15 @@ struct MilestoneRow {
 
 /// Today's UTC bounds for a window (VN calendar day).
 fn bounds_utc(window: &WindowRow) -> (DateTime<Utc>, DateTime<Utc>) {
+    bounds_utc_on(window, rules::vn_today())
+}
+
+/// UTC bounds for a window on a specific VN calendar day — so a session
+/// that started inside the window but finishes after VN midnight settles
+/// against ITS OWN day, not the day the finish happens to land on.
+fn bounds_utc_on(window: &WindowRow, day: chrono::NaiveDate) -> (DateTime<Utc>, DateTime<Utc>) {
     let offset = FixedOffset::east_opt(7 * 3600).expect("valid offset");
-    let today = rules::vn_today();
+    let today = day;
     let start = today
         .and_hms_opt(window.start_hour as u32, 0, 0)
         .expect("valid hour")
@@ -78,20 +85,25 @@ async fn milestones(state: &AppState) -> Result<Vec<MilestoneRow>, AppError> {
     )
 }
 
-/// Clean distance the user gathered inside today's window occurrence.
+/// Clean distance the user gathered inside a window occurrence. `since`
+/// clamps the window start to the user's guild-join time when settling, so
+/// distance run before joining a guild never earns that guild race XP
+/// (mirrors the guild-quest anti-sybil rule).
 async fn window_distance(
     state: &AppState,
     user_id: Uuid,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
+    since: Option<DateTime<Utc>>,
 ) -> Result<f64, AppError> {
+    let floor = since.map(|s| s.max(start)).unwrap_or(start);
     Ok(sqlx::query_scalar(
         "SELECT COALESCE(SUM(distance_m), 0)::float8 FROM activity_sessions
          WHERE user_id = $1 AND status = 'completed' AND verdict = 'clean'
            AND started_at >= $2 AND started_at < $3",
     )
     .bind(user_id)
-    .bind(start)
+    .bind(floor)
     .bind(end)
     .fetch_one(&state.db)
     .await?)
@@ -128,7 +140,9 @@ async fn list(user: AuthUser, State(state): State<AppState>) -> Result<Json<Valu
             (start + chrono::Duration::days(1) - now).num_seconds()
         };
 
-        let mine = window_distance(&state, user.user_id, start, end).await?;
+        // Display shows the user's full personal window distance (None); the
+        // post-join clamp only applies to XP settlement in on_activity.
+        let mine = window_distance(&state, user.user_id, start, end, None).await?;
         let milestone_states: Vec<MilestoneState> = defs
             .iter()
             .map(|m| MilestoneState {
@@ -196,21 +210,29 @@ pub async fn on_activity(state: &AppState, user_id: Uuid, session_id: Uuid) {
         let Some(started_at) = started_at else {
             return Ok::<(), AppError>(());
         };
-        let guild: Option<(Uuid,)> =
-            sqlx::query_as("SELECT guild_id FROM guild_members WHERE user_id = $1")
+        let guild: Option<(Uuid, DateTime<Utc>)> =
+            sqlx::query_as("SELECT guild_id, joined_at FROM guild_members WHERE user_id = $1")
                 .bind(user_id)
                 .fetch_optional(&state.db)
                 .await?;
-        let Some((guild_id,)) = guild else {
+        let Some((guild_id, joined_at)) = guild else {
             return Ok(());
         };
 
+        // Settle against the session's OWN VN day (a run that started before
+        // midnight but finishes after must credit its own day's window).
+        let session_day = started_at
+            .with_timezone(&FixedOffset::east_opt(7 * 3600).expect("valid offset"))
+            .date_naive();
+
         for window in windows(state).await? {
-            let (start, end) = bounds_utc(&window);
+            let (start, end) = bounds_utc_on(&window, session_day);
             if started_at < start || started_at >= end {
                 continue;
             }
-            let mine = window_distance(state, user_id, start, end).await?;
+            // Count only post-join distance so a runner's pre-guild km can't
+            // gift XP, and leave-A/join-B can't re-mint the same milestones.
+            let mine = window_distance(state, user_id, start, end, Some(joined_at)).await?;
             let defs = milestones(state).await?;
             let mut minted = 0i64;
             let mut tx = state.db.begin().await?;
@@ -218,11 +240,8 @@ pub async fn on_activity(state: &AppState, user_id: Uuid, session_id: Uuid) {
                 let source = Uuid::new_v5(
                     &Uuid::NAMESPACE_OID,
                     format!(
-                        "race:{}:{}:{}:{}",
-                        window.code,
-                        user_id,
-                        m.distance_m as i64,
-                        rules::vn_today()
+                        "race:{}:{}:{:.1}:{}",
+                        window.code, user_id, m.distance_m, session_day
                     )
                     .as_bytes(),
                 );

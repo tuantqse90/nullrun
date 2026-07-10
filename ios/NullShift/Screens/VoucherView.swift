@@ -1,9 +1,13 @@
 import SwiftUI
+import UIKit
 
 /// Full-screen voucher: barcode + code for the cashier, expiry countdown.
 struct VoucherView: View {
     @EnvironmentObject private var app: AppModel
     let redemption: Redemption
+
+    // Remember the user's brightness so we can restore it on exit.
+    @State private var priorBrightness = UIScreen.main.brightness
 
 
     var body: some View {
@@ -74,6 +78,13 @@ struct VoucherView: View {
         }
         .padding(.horizontal, 24)
         .background(.white)
+        // Make the "brightness maxed" pill true: crank it so the cashier can
+        // always scan, and restore the user's level when they leave.
+        .onAppear {
+            priorBrightness = UIScreen.main.brightness
+            UIScreen.main.brightness = 1.0
+        }
+        .onDisappear { UIScreen.main.brightness = priorBrightness }
     }
 
     private var expiryLabel: String {

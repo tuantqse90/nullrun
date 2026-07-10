@@ -215,8 +215,11 @@ struct ScanCamView: View {
             capturing = false
             return
         }
-        withAnimation(.easeOut(duration: 0.12)) { flash = true }
+        // Let the flash actually paint: setting true then false in the same
+        // MainActor turn coalesces to nothing, so yield between them.
+        withAnimation(.easeOut(duration: 0.1)) { flash = true }
         Haptics.success()
+        try? await Task.sleep(for: .milliseconds(180))
         withAnimation(.easeIn(duration: 0.25)) { flash = false }
 
         if pose == 1 {

@@ -97,10 +97,14 @@ struct HomeView: View {
     }
 
     private var weeklyHint: String {
-        let daysLeft = 8 - Calendar.current.component(.weekday, from: Date())
+        // Server weeks start Monday (VN). Apple weekday is 1=Sun…7=Sat;
+        // map to Mon=0…Sun=6 so days-left-incl-today is correct all week.
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        let mondayIdx = (weekday + 5) % 7
+        let daysLeft = 7 - mondayIdx
         return app.weeklyKm >= app.weeklyGoalKm
             ? "Đã đạt mục tiêu — quá đỉnh!"
-            : "Còn \(max(1, daysLeft)) ngày — bạn đang đúng nhịp"
+            : "Còn \(daysLeft) ngày — bạn đang đúng nhịp"
     }
 
     private var statGrid: some View {

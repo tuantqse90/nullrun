@@ -172,9 +172,16 @@ async fn join(state: &AppState, guild: Guild, user_id: Uuid) -> Result<Value, Ap
     if in_guild(state, user_id).await?.is_some() {
         return Err(AppError::BadRequest("bạn đang ở trong một hội rồi".into()));
     }
+    // Lock the guild row so the count-then-insert is serialized per guild —
+    // concurrent joins can't both read 29 members and push past MAX_MEMBERS.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR UPDATE")
+        .bind(guild.id)
+        .fetch_one(&mut *tx)
+        .await?;
     let members: i64 = sqlx::query_scalar("SELECT count(*) FROM guild_members WHERE guild_id = $1")
         .bind(guild.id)
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await?;
     if members >= MAX_MEMBERS {
         return Err(AppError::BadRequest("hội đã đủ thành viên".into()));
@@ -184,11 +191,12 @@ async fn join(state: &AppState, guild: Guild, user_id: Uuid) -> Result<Value, Ap
     )
     .bind(guild.id)
     .bind(user_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
     if inserted.rows_affected() == 0 {
         return Err(AppError::BadRequest("bạn đang ở trong một hội rồi".into()));
     }
+    tx.commit().await?;
     render(state, guild, user_id).await
 }
 

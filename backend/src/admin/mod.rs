@@ -180,13 +180,23 @@ async fn review_session(
     Json(body): Json<ReviewDecision>,
 ) -> Result<Json<Value>, AppError> {
     let verdict = if body.approve { "clean" } else { "rejected" };
+    // Approve accepts an already-clean session too: if a prior approve
+    // flipped the verdict but the mint then failed, the admin can retry and
+    // the idempotent on_clean_session below settles it (no more 404 trap).
+    // Reject stays suspicious-only — a cleared session can't be un-cleared.
+    let allowed: &[&str] = if body.approve {
+        &["suspicious", "clean"]
+    } else {
+        &["suspicious"]
+    };
     let row: Option<(Uuid, String, f64)> = sqlx::query_as(
         "UPDATE activity_sessions SET verdict = $2, updated_at = now()
-         WHERE id = $1 AND verdict = 'suspicious' AND status = 'completed'
+         WHERE id = $1 AND verdict = ANY($3) AND status = 'completed'
          RETURNING user_id, activity_type, distance_m",
     )
     .bind(id)
     .bind(verdict)
+    .bind(allowed)
     .fetch_optional(&state.db)
     .await?;
     let Some((user_id, activity_type, distance_m)) = row else {

@@ -306,8 +306,18 @@ struct LeagueView: View {
         .overlay(alignment: .bottom) { Theme.divider.frame(height: 1) }
     }
 
+    /// League one tier above the user's current one (promotion target).
+    private var nextLeagueTitle: String {
+        switch app.points?.tier {
+        case "bronze": return "Giải Bạc"
+        case "silver": return "Giải Vàng"
+        case "gold", "platinum": return "Giải Bạch Kim"
+        default: return "hạng trên"
+        }
+    }
+
     private func meHint(_ entry: LeaderboardEntry) -> String {
-        if entry.rank <= promotionCut { return "Giữ vững là lên Giải Vàng" }
+        if entry.rank <= promotionCut { return "Giữ vững là lên \(nextLeagueTitle)" }
         let demotionStart = standings.count - demotionCount + 1
         let gap = demotionStart - entry.rank
         if standings.count > 15 && gap <= 3 { return "Cách vùng xuống hạng \(gap) bậc" }

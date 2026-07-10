@@ -21,6 +21,13 @@ final class RunTracker: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var route: [CLLocationCoordinate2D] = []
     /// Pedometer steps since begin() — device hardware count (0 on simulator).
     @Published var steps = 0
+    /// Elapsed seconds at each completed km — REAL per-km splits for the
+    /// summary (empty if the run wasn't tracked on this device).
+    @Published var kmSplits: [Int] = []
+    /// Last milestone (km or 1000-step block) whose flag was shown — lives
+    /// here so a lock/unlock round trip doesn't recreate RunView's state and
+    /// replay the pill + haptic for the current milestone.
+    @Published var lastMilestoneShown = 0
 
     private let manager = CLLocationManager()
     private let pedometer = CMPedometer()
@@ -38,6 +45,13 @@ final class RunTracker: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     var paceSecPerKm: Double? {
         distanceKm > 0.05 ? Double(seconds) / distanceKm : nil
+    }
+
+    deinit {
+        // The repeating timer is retained by the run loop; without this it
+        // would stay scheduled forever if the tracker is torn down mid-run.
+        timer?.invalidate()
+        manager.stopUpdatingLocation()
     }
 
     override init() {
@@ -62,6 +76,8 @@ final class RunTracker: NSObject, ObservableObject, CLLocationManagerDelegate {
         seconds = 0
         distanceKm = 0
         steps = 0
+        kmSplits.removeAll()
+        lastMilestoneShown = 0
         lastLocation = nil
         route.removeAll()
         buffer.removeAll()
@@ -133,15 +149,28 @@ final class RunTracker: NSObject, ObservableObject, CLLocationManagerDelegate {
         buffer.removeAll()
         guard let sessionId else { return }
         let previous = uploadTask
-        uploadTask = Task {
+        uploadTask = Task { @MainActor in
             await previous?.value // keep batches ordered
-            try? await APIClient.shared.pushPoints(session: sessionId, points: batch)
+            do {
+                try await APIClient.shared.pushPoints(session: sessionId, points: batch)
+            } catch {
+                // Upload failed (flaky network) — requeue the batch at the
+                // front so these GPS points aren't silently lost; the next
+                // flush or finish() retries them. Server dedups on PK.
+                buffer.insert(contentsOf: batch, at: 0)
+            }
         }
     }
 
+    /// Drains the buffer, retrying failed uploads a few times so a transient
+    /// blip at finish doesn't drop the tail of the run.
     private func flushNow() async {
-        flushBuffer()
-        await uploadTask?.value
+        for _ in 0..<4 {
+            flushBuffer()
+            await uploadTask?.value
+            if buffer.isEmpty { return }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
     }
 
     // MARK: CLLocationManagerDelegate
@@ -179,6 +208,10 @@ final class RunTracker: NSObject, ObservableObject, CLLocationManagerDelegate {
                 let speed = meters / dt
                 if speed <= 12, speed >= 0.3 {
                     distanceKm += meters / 1000
+                    // Record a REAL split each time we cross a whole km.
+                    while kmSplits.count < Int(distanceKm) {
+                        kmSplits.append(seconds)
+                    }
                 }
             }
         }

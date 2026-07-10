@@ -542,9 +542,8 @@ struct GuildView: View {
         }
     }
 
-    private func createGuild(name: String, emblem: String, zalo: String) async {
-        busy = true
-        error = nil
+    /// Returns an error message to show inside the sheet, or nil on success.
+    private func createGuild(name: String, emblem: String, zalo: String) async -> String? {
         do {
             app.guild = try await APIClient.shared.createGuild(
                 name: name, emblem: emblem, zaloLink: zalo.isEmpty ? nil : zalo
@@ -552,10 +551,10 @@ struct GuildView: View {
             showCreate = false
             Haptics.success()
             app.showToast("Hội đã lập — gửi mã mời cho đồng bọn!")
+            return nil
         } catch {
-            self.error = error.localizedDescription
+            return error.localizedDescription
         }
-        busy = false
     }
 
     private func joinByCode() async {
@@ -583,12 +582,14 @@ struct GuildView: View {
         busy = false
     }
 
-    private func saveSettings(emblem: String, zalo: String) async {
+    /// Returns an error message to show inside the sheet, or nil on success.
+    private func saveSettings(emblem: String, zalo: String) async -> String? {
         do {
             app.guild = try await APIClient.shared.updateGuildSettings(emblem: emblem, zaloLink: zalo)
             showSettings = false
+            return nil
         } catch {
-            self.error = error.localizedDescription
+            return error.localizedDescription
         }
     }
 
@@ -622,13 +623,14 @@ private struct PulseDot: ViewModifier {
 private let emblemChoices = ["🦔", "🌙", "🔥", "⚡", "🌿", "🏃", "💪", "🌸", "🚀", "🐢"]
 
 struct GuildCreateSheet: View {
-    let onCreate: (String, String, String) async -> Void
+    let onCreate: (String, String, String) async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var emblem = "🦔"
     @State private var zalo = ""
     @State private var busy = false
+    @State private var error: String?
     @FocusState private var nameFocused: Bool
 
     private var validName: Bool { (3...30).contains(name.trimmingCharacters(in: .whitespaces).count) }
@@ -698,12 +700,18 @@ struct GuildCreateSheet: View {
                     .font(.viet(11.5)).foregroundStyle(Theme.faint)
             }
 
+            if let error {
+                Text(error).font(.viet(13)).foregroundStyle(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             Spacer()
 
             PrimaryButton(title: busy ? "Đang lập hội…" : "Lập hội", height: 56, color: Theme.purpleDeep, glow: true) {
                 busy = true
+                error = nil
                 Task {
-                    await onCreate(name.trimmingCharacters(in: .whitespaces), emblem, zalo.trimmingCharacters(in: .whitespaces))
+                    error = await onCreate(name.trimmingCharacters(in: .whitespaces), emblem, zalo.trimmingCharacters(in: .whitespaces))
                     busy = false
                 }
             }
@@ -725,10 +733,11 @@ struct GuildCreateSheet: View {
 struct GuildSettingsSheet: View {
     @State var emblem: String
     @State var zaloLink: String
-    let onSave: (String, String) async -> Void
+    let onSave: (String, String) async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
+    @State private var error: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -782,12 +791,18 @@ struct GuildSettingsSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             }
 
+            if let error {
+                Text(error).font(.viet(13)).foregroundStyle(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             Spacer()
 
             PrimaryButton(title: busy ? "Đang lưu…" : "Lưu", height: 54, color: Theme.purpleDeep) {
                 busy = true
+                error = nil
                 Task {
-                    await onSave(emblem, zaloLink.trimmingCharacters(in: .whitespaces))
+                    error = await onSave(emblem, zaloLink.trimmingCharacters(in: .whitespaces))
                     busy = false
                 }
             }

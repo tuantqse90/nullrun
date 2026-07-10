@@ -41,7 +41,16 @@ final class APIClient {
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.keyEncodingStrategy = .convertToSnakeCase
-        e.dateEncodingStrategy = .iso8601
+        // Encode with FRACTIONAL seconds: plain .iso8601 truncates to whole
+        // seconds, so two GPS fixes in the same wall-clock second collide on
+        // the backend's gps_points PK (session_id, recorded_at) and one is
+        // silently dropped — distance would read short.
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        e.dateEncodingStrategy = .custom { date, enc in
+            var c = enc.singleValueContainer()
+            try c.encode(iso.string(from: date))
+        }
         return e
     }()
 
@@ -351,6 +360,10 @@ final class APIClient {
                 "POST", "/v1/auth/refresh",
                 body: ["refresh_token": refreshToken], auth: false
             )
+            // A logout during this in-flight refresh wipes the Keychain; only
+            // commit if the token we refreshed from is still current, else a
+            // logged-out device would silently resume with a fresh pair.
+            guard Keychain.get("refresh_token") == refreshToken else { return false }
             Keychain.set(pair.accessToken, for: "access_token")
             Keychain.set(pair.refreshToken, for: "refresh_token")
             return true

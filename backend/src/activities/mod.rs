@@ -312,7 +312,7 @@ async fn finish(
     }
 
     let flags: Vec<String> = eval.flags.iter().map(|f| f.to_string()).collect();
-    let session: Session = sqlx::query_as(&format!(
+    let updated: Option<Session> = sqlx::query_as(&format!(
         "UPDATE activity_sessions
          SET status = 'completed', ended_at = now(), distance_m = $3, duration_s = $4,
              avg_pace_s_per_km = $5, fraud_score = $6, fraud_flags = $7, verdict = $8,
@@ -329,10 +329,26 @@ async fn finish(
     .bind(&flags)
     .bind(eval.verdict)
     .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    .await?;
 
-    // Genuine-only earning: ONLY clean sessions reach the mint.
+    // Make finish() safely retryable: if a prior finish already completed the
+    // session but the mint then failed (or the client retries after a
+    // timeout), re-fetch the completed session and re-run the idempotent
+    // mint below instead of 404-ing and stranding the points unminted.
+    let session: Session = match updated {
+        Some(s) => s,
+        None => sqlx::query_as(&format!(
+            "SELECT {SESSION_COLS} FROM activity_sessions
+             WHERE id = $1 AND user_id = $2 AND status = 'completed'"
+        ))
+        .bind(id)
+        .bind(user.user_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?,
+    };
+
+    // Genuine-only earning: ONLY clean sessions reach the mint (idempotent).
     let (points_earned, challenge_bonus) = if session.verdict == "clean" {
         crate::gamification::on_clean_session(
             &state,

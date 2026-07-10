@@ -164,6 +164,13 @@ async fn cancel(
     Ok(Json(json!({ "cancelled": true })))
 }
 
+/// Per-player race state used for unambiguous settlement.
+struct Crossing {
+    crossed_at: Option<DateTime<Utc>>,
+    terminal: bool,
+    eligible: bool,
+}
+
 #[derive(Serialize)]
 struct PlayerState {
     user_id: Uuid,
@@ -178,6 +185,8 @@ struct PlayerState {
 /// filtered distances and settles the winner when someone has crossed.
 async fn render(state: &AppState, duel: Duel, me: Uuid) -> Result<Value, AppError> {
     let mut players = Vec::new();
+    // Per-player crossing/settlement state, parallel to `players`.
+    let mut settle_times: Vec<Crossing> = Vec::new();
     let mut duel = duel;
 
     for pid in [Some(duel.creator_id), duel.opponent_id]
@@ -192,29 +201,47 @@ async fn render(state: &AppState, duel: Duel, me: Uuid) -> Result<Value, AppErro
         let name = display_name
             .unwrap_or_else(|| format!("Runner •••{}", &phone[phone.len().saturating_sub(3)..]));
 
-        let session: Option<(Uuid,)> =
-            sqlx::query_as("SELECT id FROM activity_sessions WHERE duel_id = $1 AND user_id = $2")
-                .bind(duel.id)
-                .bind(pid)
-                .fetch_optional(&state.db)
-                .await?;
+        let session: Option<(Uuid, String, String)> = sqlx::query_as(
+            "SELECT id, status, verdict FROM activity_sessions WHERE duel_id = $1 AND user_id = $2",
+        )
+        .bind(duel.id)
+        .bind(pid)
+        .fetch_optional(&state.db)
+        .await?;
 
-        let (distance, crossed_at) = if let Some((session_id,)) = session {
-            let points: Vec<compute::Point> = sqlx::query_as(
-                "SELECT recorded_at, lat, lon, horizontal_accuracy_m
-                 FROM gps_points WHERE session_id = $1 ORDER BY recorded_at",
-            )
-            .bind(session_id)
-            .fetch_all(&state.db)
-            .await?;
-            let stats = compute::session_stats(&points);
-            (
-                stats.distance_m,
-                compute::crossing_time(&points, duel.target_m),
-            )
-        } else {
-            (0.0, None)
-        };
+        let (distance, crossed_at) =
+            if let Some((session_id, status, verdict)) = &session {
+                let points: Vec<compute::Point> = sqlx::query_as(
+                    "SELECT recorded_at, lat, lon, horizontal_accuracy_m
+                     FROM gps_points WHERE session_id = $1 ORDER BY recorded_at",
+                )
+                .bind(session_id)
+                .fetch_all(&state.db)
+                .await?;
+                let stats = compute::session_stats(&points);
+                let crossed = compute::crossing_time(&points, duel.target_m);
+                // A session is TERMINAL once finished/discarded; only a
+                // completed+clean crossing is eligible to win. A rejected or
+                // discarded session is terminal-but-excluded (fraud never
+                // mints), and an active crosser is still pending.
+                let is_terminal = status == "completed" || status == "discarded";
+                let eligible = status == "completed" && verdict == "clean";
+                settle_times.push(Crossing {
+                    crossed_at: crossed,
+                    terminal: is_terminal,
+                    eligible,
+                });
+                (stats.distance_m, crossed)
+            } else {
+                // No session yet — treat as a pending (non-terminal) player so
+                // we don't settle before both have raced.
+                settle_times.push(Crossing {
+                    crossed_at: None,
+                    terminal: false,
+                    eligible: false,
+                });
+                (0.0, None)
+            };
 
         players.push(PlayerState {
             user_id: pid,
@@ -226,12 +253,27 @@ async fn render(state: &AppState, duel: Duel, me: Uuid) -> Result<Value, AppErro
         });
     }
 
-    // Settle: earliest GPS crossing wins.
+    // Settle only when the winner is unambiguous: the earliest eligible
+    // (finished + clean) crossing wins, AND no still-running player has an
+    // earlier crossing that could overturn it. A player who crossed but
+    // hasn't finished blocks settlement until their verdict is known — this
+    // stops "B finishes first but A crossed earlier" from crowning B.
     if duel.status == "active" {
-        let winner = players
+        let earliest_eligible = players
             .iter()
-            .filter_map(|p| p.crossed_at.map(|t| (p.user_id, t)))
+            .zip(&settle_times)
+            .filter_map(|(p, c)| if c.eligible { c.crossed_at.map(|t| (p.user_id, t)) } else { None })
             .min_by_key(|(_, t)| *t);
+        // Is anyone still pending (crossed but not terminal) who could beat it?
+        let pending_earlier = |cut: DateTime<Utc>| {
+            settle_times.iter().any(|c| {
+                !c.terminal && c.crossed_at.map(|t| t <= cut).unwrap_or(false)
+            })
+        };
+        let winner = match earliest_eligible {
+            Some((wid, t)) if !pending_earlier(t) => Some((wid, t)),
+            _ => None,
+        };
         if let Some((winner_id, _)) = winner {
             let settled = sqlx::query(
                 "UPDATE duels SET status = 'finished', winner_id = $2, finished_at = now()

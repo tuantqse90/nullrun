@@ -210,11 +210,17 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(true, forKey: "guardian.linked")
     }
 
+    private var toastDismissTask: Task<Void, Never>?
+
     func showToast(_ message: String) {
+        // Cancel any pending dismissal so an older toast's timer can't clear
+        // a newer toast shown within its window.
+        toastDismissTask?.cancel()
         withAnimation { toast = message }
-        Task {
+        toastDismissTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.4))
-            withAnimation { self.toast = nil }
+            guard !Task.isCancelled else { return }
+            withAnimation { self?.toast = nil }
         }
     }
 

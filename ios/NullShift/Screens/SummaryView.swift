@@ -134,16 +134,20 @@ struct SummaryView: View {
         .card(radius: 18, padding: EdgeInsets(top: 13, leading: 14, bottom: 13, trailing: 14))
     }
 
-    // Even splits derived from server totals (per-km splits arrive with a
-    // richer stats endpoint later).
+    // REAL per-km splits from the tracker's recorded km marks — no
+    // fabricated data. Empty when the run wasn't tracked on this device
+    // (e.g. design QA), in which case the card is hidden.
     private var splits: [(km: Int, frac: Double, pace: String)] {
-        let fullKms = Int(km)
-        guard fullKms >= 1, session.durationS > 0, km > 0 else { return [] }
-        let base = session.durationS / km
-        return (1...min(fullKms, 5)).map { i in
-            let jitter = Double((i * 37) % 25 - 12)
-            let pace = max(60, base + jitter)
-            return (i, Double(60 + (i * 53) % 35) / 100.0, Fmt.pace(pace))
+        let marks = tracker.kmSplits
+        guard marks.count >= 1 else { return [] }
+        var paces: [Double] = []
+        for i in marks.indices {
+            let prev = i == 0 ? 0 : marks[i - 1]
+            paces.append(Double(marks[i] - prev)) // seconds for this km
+        }
+        let slowest = max(paces.max() ?? 1, 1)
+        return paces.prefix(6).enumerated().map { i, p in
+            (i + 1, max(0.15, p / slowest), Fmt.pace(p))
         }
     }
 

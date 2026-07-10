@@ -177,15 +177,26 @@ pub async fn claim(
                 )));
             }
         }
-        _ => {
-            // self-report: hard daily cap across all self games. Only
-            // SUCCESSFUL claims consume the cap (incremented after commit).
-            let cap_key = format!("game:selfcap:{}:{}", user.user_id, rules::vn_today());
-            let count: Option<i64> = state.redis.get(&cap_key).await?;
-            if count.unwrap_or(0) >= SELF_CLAIMS_PER_DAY {
-                return Err(AppError::TooManyRequests);
-            }
+        _ => {}
+    }
+
+    // self-report: hard daily cap across all self games, reserved ATOMICALLY
+    // before the mint (INCR then check) so concurrent claims on distinct self
+    // games can't both slip past a stale GET. The slot is released below if
+    // the mint turns out to be a duplicate — only successful distinct claims
+    // ultimately consume the cap.
+    let cap_key = format!("game:selfcap:{}:{}", user.user_id, rules::vn_today());
+    let mut reserved_slot = false;
+    if game.verification == "self" {
+        let count: i64 = state.redis.incr(&cap_key).await?;
+        if count == 1 {
+            let _: bool = state.redis.expire(&cap_key, 86_400, None).await?;
         }
+        if count > SELF_CLAIMS_PER_DAY {
+            let _: i64 = state.redis.decr(&cap_key).await?;
+            return Err(AppError::TooManyRequests);
+        }
+        reserved_slot = true;
     }
 
     let source = source_for(&game, user.user_id);
@@ -203,6 +214,9 @@ pub async fn claim(
     .await?;
     if inserted.rows_affected() == 0 {
         tx.rollback().await?;
+        if reserved_slot {
+            let _: i64 = state.redis.decr(&cap_key).await?; // release: duplicate, not a new claim
+        }
         return Err(AppError::BadRequest(match game.cadence.as_str() {
             "once" => "đã nhận thưởng cột mốc này rồi".into(),
             _ => "hôm nay đã hoàn thành game này rồi".into(),
@@ -214,14 +228,6 @@ pub async fn claim(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-
-    if game.verification == "self" {
-        let cap_key = format!("game:selfcap:{}:{}", user.user_id, rules::vn_today());
-        let count: i64 = state.redis.incr(&cap_key).await?;
-        if count == 1 {
-            let _: bool = state.redis.expire(&cap_key, 86_400, None).await?;
-        }
-    }
 
     Ok(Json(
         json!({ "claimed": true, "points": game.reward_points, "title": game.title }),

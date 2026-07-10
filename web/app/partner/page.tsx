@@ -60,6 +60,15 @@ export default function Partner() {
   const totalRedemptions = fulfilled.reduce((a, r) => a + r.count, 0);
   const totalPoints = fulfilled.reduce((a, r) => a + r.points, 0);
 
+  // "Active today" must actually match today's VN date — active_users[0] is
+  // merely the most recent day that had any sessions, which is stale on a
+  // quiet morning. Show 0 when today has no row yet.
+  const todayVN = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+  }).format(new Date());
+  const activeToday =
+    stats?.active_users.find((u) => u.day.startsWith(todayVN))?.count ?? 0;
+
   return (
     <main>
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -79,7 +88,7 @@ export default function Partner() {
           <div className="l">Điểm quy đổi</div>
         </div>
         <div className="card stat">
-          <div className="n">{stats?.active_users[0]?.count ?? 0}</div>
+          <div className="n">{activeToday}</div>
           <div className="l">User hoạt động hôm nay</div>
         </div>
       </div>

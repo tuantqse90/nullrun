@@ -64,12 +64,20 @@ struct RewardsView: View {
                 .keyboardType(.numberPad)
             Button("Liên kết") {
                 Task {
-                    do { try await app.linkGuardian(memberId: memberId) } catch { self.error = error.localizedDescription }
+                    do { try await app.linkGuardian(memberId: memberId) }
+                    catch { self.error = error.localizedDescription }
                 }
             }
             Button("Để sau", role: .cancel) {}
         } message: {
             Text("Cần liên kết thẻ Hội Cam để đổi quà Guardian.")
+        }
+        // Surface link failures — previously written to `error` but never shown.
+        .alert("Không liên kết được", isPresented: Binding(
+            get: { error != nil }, set: { if !$0 { error = nil } })) {
+            Button("OK", role: .cancel) { error = nil }
+        } message: {
+            Text(error ?? "")
         }
         .task { await app.refresh() }
     }
@@ -266,6 +274,10 @@ struct RedeemSheet: View {
 
     @State private var busy = false
     @State private var error: String?
+    // Stable per-presentation key: retrying after an ambiguous network
+    // failure must reuse the SAME idempotency key so the backend returns the
+    // existing redemption instead of double-spending the user's points.
+    @State private var idempotencyKey = "ios-\(UUID().uuidString.prefix(24))"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -339,7 +351,7 @@ struct RedeemSheet: View {
         do {
             let redemption = try await APIClient.shared.redeem(
                 reward: reward.id,
-                idempotencyKey: "ios-\(UUID().uuidString.prefix(24))"
+                idempotencyKey: idempotencyKey
             )
             done(redemption)
         } catch let e as APIClient.APIError where e.localizedDescription.contains("Guardian") {

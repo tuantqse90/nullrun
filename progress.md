@@ -17,6 +17,23 @@
 
 ## Log
 
+### 2026-07-11 (Bug hunt toàn project — 33-agent review, fix 24 bug)
+
+Workflow 7 lens (backend-new/economy/security, ios-core/screens, api-contract, web) + adversarial verify chéo → 25 confirmed, 1 refuted (SceneView rebuild — SwiftUI prune body đúng). Fix 24, deploy + verify hết:
+
+**Backend (economy/security):**
+- [x] **Duel mint từ GPS chưa qua fraud (HIGH)** — settle từ live GPS TRƯỚC finish → session giả/rejected vẫn mint. Fix: chỉ settle khi crossing từ session `completed`+`clean`; và chỉ khi không còn ai đang chạy có thể cán sớm hơn (tránh "B finish trước nhưng A cán sớm hơn thắng sai"). Smoke mới xác nhận duel KHÔNG settle khi session còn mở
+- [x] **Partner event bypass cap + re-mint mission (2×HIGH)** — `occurred_at` do đối tác gửi không validate → event lùi ngày né cap hôm nay, event tương lai tính vào mọi kỳ mission về sau. Fix: chặn mint ngoài [now-48h, now+15m], cap đếm theo VN-day CỦA event, metric mission có chặn trên `<= now()`. Smoke `m_vetc_abuse` 6/6 (backdated ≤ cap, stale/future rejected, replay idempotent)
+- [x] **Guild join capacity race (MED)** — count-then-insert không lock → vượt MAX_MEMBERS. Fix: `SELECT … FOR UPDATE` serialize theo guild
+- [x] **Race window theo ngày settle-time không phải session-day (MED)** + **race XP không idempotent qua đổi hội / bỏ qua joined_at (MED)** — fix: bounds theo VN-day của session, window_distance clamp `joined_at`, source id dùng `{:.1}` không truncate
+- [x] **admin review retry 404 (MED)** — approve chấp nhận session đã `clean` để re-mint idempotent; **finish() retry-safe** (re-fetch completed session, mint lại idempotent thay vì mất điểm)
+- [x] **games self-cap non-atomic (LOW)** — reserve slot bằng INCR trước mint, DECR khi trùng
+**iOS:**
+- [x] **GPS batch mất khi upload fail (HIGH)** — requeue vào buffer + flushNow retry 4 lần; **redeem idempotency key giữ ổn định/sheet (HIGH)** — không double-spend khi retry; **date encode fractional-seconds** — 2 fix GPS cùng giây không đè PK
+- [x] rotateTokens vs logout race (guard token còn hiện tại mới ghi); Guild create/settings + Guardian link error giờ hiển thị; VoucherView THẬT tăng độ sáng; Fmt.time có giờ; LeagueView hạng kế theo tier; HomeView đếm ngày tuần Monday-start; SummaryView splits = số THẬT từ tracker (bỏ jitter bịa); RunView milestone baseline sống qua khoá màn; ScanView flash render được; showToast không bị timer cũ xoá; RunTracker deinit dọn timer
+**Web:** partner "active hôm nay" khớp đúng ngày VN (bỏ `[0]` stale); vetc `.console.gate` selector compound
+- [x] Verify: backend clippy sạch + 29 unit + 6 smoke suite (m3/m4/guild/races/duel-14/vetc-abuse-6) pass; iOS build + UI 3/3 pass; web tsc + build sạch. Deploy VPS (abuse smoke 6/6 trên api.nullshift.sh) + web; device binary build sẵn chờ cắm iPhone
+
 ### 2026-07-11 (VETC/AABW demo layer — engine đổi nguồn sự kiện, thêm lớp AI)
 
 - [x] **Partner event adapter (migration 0011)**: `POST /v1/partner/events` (x-partner-token, batch ≤500) — VETC đẩy sự kiện toll_pass/topup/fuel/parking; idempotent theo (partner, external_id); map user qua SĐT (event đến trước khi có account thì lưu chờ); mint `partner_event` theo `partner_event_rules` (điểm + cap/ngày/loại — DB rows) vào CÙNG points_ledger của fitness. Chứng minh luận điểm pitch: engine source-agnostic

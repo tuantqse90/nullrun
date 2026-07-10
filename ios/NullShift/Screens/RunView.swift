@@ -9,7 +9,6 @@ struct RunView: View {
     @State private var holdTimer: Timer?
     @State private var finishing = false
     @State private var finishError: String?
-    @State private var lastKmShown = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -157,22 +156,22 @@ struct RunView: View {
     private var kmFlag: some View {
         if tracker.activityType == "walk" {
             let block = tracker.steps / 1000
-            if block >= 1, block != lastKmShown {
+            if block >= 1, block != tracker.lastMilestoneShown {
                 milestonePill(icon: "shoeprints.fill", label: "\(Fmt.int(block * 1000)) bước")
                     .task {
                         Haptics.success()
                         try? await Task.sleep(for: .seconds(2.2))
-                        lastKmShown = block
+                        tracker.lastMilestoneShown = block
                     }
             }
         } else {
             let km = Int(tracker.distanceKm)
-            if km >= 1, km != lastKmShown {
+            if km >= 1, km != tracker.lastMilestoneShown {
                 milestonePill(icon: "flag.fill", label: "\(km) km")
                     .task {
                         Haptics.success()
                         try? await Task.sleep(for: .seconds(2.2))
-                        lastKmShown = km
+                        tracker.lastMilestoneShown = km
                     }
             }
         }

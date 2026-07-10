@@ -98,9 +98,13 @@ async fn ingest(
     let mut accepted = 0usize;
     let mut duplicates = 0usize;
     let mut unmatched = 0usize;
+    let mut rejected_stale = 0usize;
     let mut points_minted = 0i64;
     let mut missions_completed: Vec<Value> = Vec::new();
     let season = rules::current_season();
+    let now = Utc::now();
+    // Distinct users touched this batch → settle missions once each at the end.
+    let mut touched: std::collections::HashMap<Uuid, String> = std::collections::HashMap::new();
 
     for event in &body.events {
         let user_id = resolve_user(&state, &event.user_ref).await?;
@@ -134,15 +138,31 @@ async fn ingest(
         accepted += 1;
         let Some(user_id) = user_id else { continue };
 
-        // Per-type daily cap: how many of this type already counted today.
+        // Anti-abuse: events are stored for audit but only MINT if their
+        // timestamp is sane — no future dates (would seed every later
+        // mission period) and nothing older than 48h (a stale backfill or
+        // token-replay must not bypass the daily cap by dodging today's
+        // window). Legit same-day/yesterday events still reward.
+        if event.occurred_at > now + Duration::minutes(15)
+            || event.occurred_at < now - Duration::hours(48)
+        {
+            rejected_stale += 1;
+            continue;
+        }
+
+        // Per-type daily cap, counted within the event's OWN VN day so
+        // backdated events can't dodge the cap window.
         if let Some(rule) = rules_rows.iter().find(|r| r.event_type == event.event_type) {
+            let (day_start, day_end) = vn_day_window(event.occurred_at);
             let today_count: i64 = sqlx::query_scalar(
                 "SELECT count(*) FROM partner_events
-                 WHERE user_id = $1 AND event_type = $2 AND occurred_at >= $3 AND id != $4",
+                 WHERE user_id = $1 AND event_type = $2
+                   AND occurred_at >= $3 AND occurred_at < $4 AND id != $5",
             )
             .bind(user_id)
             .bind(&event.event_type)
-            .bind(rules::vn_day_start_utc())
+            .bind(day_start)
+            .bind(day_end)
             .bind(event_id)
             .fetch_one(&state.db)
             .await?;
@@ -171,10 +191,16 @@ async fn ingest(
             }
         }
 
-        // Missions settle after every event — idempotent, cheap.
-        for done in settle_missions(&state, user_id).await? {
+        // Defer mission settlement to once-per-user after the batch — a
+        // 500-event batch from one driver must not run the 6-mission sweep
+        // 500 times (that was thousands of serial round-trips per request).
+        touched.entry(user_id).or_insert_with(|| event.user_ref.clone());
+    }
+
+    for (user_id, user_ref) in &touched {
+        for done in settle_missions(&state, *user_id).await? {
             missions_completed.push(json!({
-                "user_ref": event.user_ref,
+                "user_ref": user_ref,
                 "key": done.0,
                 "title": done.1,
                 "reward_points": done.2,
@@ -186,6 +212,7 @@ async fn ingest(
         "accepted": accepted,
         "duplicates": duplicates,
         "unmatched_users": unmatched,
+        "rejected_stale": rejected_stale,
         "points_minted": points_minted,
         "missions_completed": missions_completed,
     })))
@@ -211,6 +238,20 @@ async fn missions(state: &AppState) -> Result<Vec<Mission>, AppError> {
     )
     .fetch_all(&state.db)
     .await?)
+}
+
+/// The VN-calendar-day [start, end) in UTC that contains `ts`.
+fn vn_day_window(ts: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+    let offset = FixedOffset::east_opt(7 * 3600).expect("valid offset");
+    let day = ts.with_timezone(&offset).date_naive();
+    let start = day
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight")
+        .and_local_timezone(offset)
+        .single()
+        .expect("no DST in VN")
+        .with_timezone(&Utc);
+    (start, start + Duration::days(1))
 }
 
 fn vn_month_start_utc() -> DateTime<Utc> {
@@ -248,7 +289,7 @@ async fn metric_value(
     let value: i64 = match metric {
         "events" => {
             sqlx::query_scalar(
-                "SELECT count(*) FROM partner_events WHERE user_id = $1 AND occurred_at >= $2",
+                "SELECT count(*) FROM partner_events WHERE user_id = $1 AND occurred_at >= $2 AND occurred_at <= now()",
             )
             .bind(user_id)
             .bind(since)
@@ -263,7 +304,7 @@ async fn metric_value(
             };
             sqlx::query_scalar(
                 "SELECT count(*) FROM partner_events
-                 WHERE user_id = $1 AND event_type = $2 AND occurred_at >= $3",
+                 WHERE user_id = $1 AND event_type = $2 AND occurred_at >= $3 AND occurred_at <= now()",
             )
             .bind(user_id)
             .bind(event_type)
@@ -275,7 +316,7 @@ async fn metric_value(
             // VN hour outside both rush windows — the traffic-shaping metric.
             sqlx::query_scalar(
                 "SELECT count(*) FROM partner_events
-                 WHERE user_id = $1 AND event_type = 'toll_pass' AND occurred_at >= $2
+                 WHERE user_id = $1 AND event_type = 'toll_pass' AND occurred_at >= $2 AND occurred_at <= now()
                    AND NOT (
                      EXTRACT(HOUR FROM occurred_at AT TIME ZONE 'Asia/Ho_Chi_Minh') IN (6,7,8,16,17,18)
                    )",
@@ -288,7 +329,7 @@ async fn metric_value(
         "provinces" => {
             sqlx::query_scalar(
                 "SELECT count(DISTINCT province) FROM partner_events
-                 WHERE user_id = $1 AND province IS NOT NULL AND occurred_at >= $2",
+                 WHERE user_id = $1 AND province IS NOT NULL AND occurred_at >= $2 AND occurred_at <= now()",
             )
             .bind(user_id)
             .bind(since)
@@ -554,7 +595,7 @@ async fn driver_profile(state: &AppState, user_id: Uuid) -> Result<Value, AppErr
             count(*) FILTER (WHERE event_type = 'toll_pass'),
             count(DISTINCT province) FILTER (WHERE province IS NOT NULL),
             count(*) FILTER (WHERE event_type = 'topup')
-         FROM partner_events WHERE user_id = $1 AND occurred_at >= $2",
+         FROM partner_events WHERE user_id = $1 AND occurred_at >= $2 AND occurred_at <= now()",
     )
     .bind(user_id)
     .bind(since)

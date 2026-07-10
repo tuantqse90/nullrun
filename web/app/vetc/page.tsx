@@ -288,7 +288,7 @@ function AiResult({ kind, data }: { kind: string; data: unknown }) {
 const styles = `
   .console { max-width: 1060px; margin: 0 auto; padding: 28px 20px 60px;
     font-family: ui-sans-serif, system-ui; color: #26221c; }
-  .console .gate { max-width: 520px; padding-top: 90px; }
+  .console.gate { max-width: 520px; padding-top: 90px; }
   header { display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 18px; }
   h1 { font-size: 24px; margin: 0 0 6px; }
