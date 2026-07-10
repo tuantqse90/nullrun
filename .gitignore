@@ -23,3 +23,5 @@ build/
 # xcodegen output (regenerate: cd ios && xcodegen generate)
 ios/NullShift.xcodeproj/
 ios/build-device/
+web/tsconfig.tsbuildinfo
+*.tsbuildinfo
