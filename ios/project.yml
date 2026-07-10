@@ -1,0 +1,88 @@
+# XcodeGen spec — generate the Xcode project with:
+#   brew install xcodegen && cd ios && xcodegen generate && open NullShift.xcodeproj
+name: NullShift
+options:
+  bundleIdPrefix: com.nullshift
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  # Real basemap — self-hosted NullMaps (maps.nullshift.sh), MapLibre-compatible.
+  MapLibre:
+    url: https://github.com/maplibre/maplibre-gl-native-distribution
+    from: 6.0.0
+schemes:
+  NullShift:
+    build:
+      targets:
+        NullShift: all
+        NullShiftUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [NullShiftUITests]
+
+targets:
+  NullShiftUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: NullShift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+  NullShift:
+    type: application
+    platform: iOS
+    sources: [NullShift]
+    dependencies:
+      - package: MapLibre
+    # NOTE: the App Attest entitlement (com.apple.developer.devicecheck.
+    # appattest-environment) is removed while signing with a free Personal
+    # Team — free provisioning rejects it. Restore it once the paid Apple
+    # Developer account lands (required for real ATTEST_MODE=apple anyway).
+    info:
+      path: NullShift/Info.plist
+      properties:
+        UILaunchScreen: {}
+        CFBundleDisplayName: NullShift
+        # Production API for physical-device builds (simulator uses
+        # localhost). For LAN dev against the Mac, temporarily switch back
+        # to http://<mac-ip>:8080 (NSAllowsLocalNetworking already set).
+        API_BASE_URL: https://api.nullshift.sh
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: >-
+          Kết nối tới máy chủ phát triển trên máy Mac trong cùng mạng Wi-Fi.
+        UIAppFonts:
+          - BeVietnamPro-Regular.ttf
+          - BeVietnamPro-Medium.ttf
+          - BeVietnamPro-SemiBold.ttf
+          - BeVietnamPro-Bold.ttf
+          - BeVietnamPro-ExtraBold.ttf
+          - IBMPlexMono-Regular.ttf
+          - IBMPlexMono-Medium.ttf
+          - IBMPlexMono-SemiBold.ttf
+          - IBMPlexMono-Bold.ttf
+        # Background location IS the product — anti-cheat needs clean sensor data.
+        UIBackgroundModes: [location]
+        NSLocationWhenInUseUsageDescription: >-
+          NullShift ghi lại quãng đường chạy/đi bộ của bạn để tính điểm thưởng.
+        NSLocationAlwaysAndWhenInUseUsageDescription: >-
+          Cho phép "Luôn luôn" để NullShift ghi nhận hoạt động ngay cả khi màn hình tắt —
+          đây là cách bạn nhận điểm cho mọi bước chạy.
+        NSMotionUsageDescription: >-
+          Dữ liệu chuyển động giúp xác thực hoạt động thật và chống gian lận.
+        NSCameraUsageDescription: >-
+          Camera dùng để quét hình bóng cơ thể — ảnh xử lý ngay trên máy,
+          không lưu, không tải lên.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nullshift.app
+        SWIFT_VERSION: "5.10"
+        TARGETED_DEVICE_FAMILY: "1"
+        # Free Personal Team signing — survives xcodegen regeneration.
+        DEVELOPMENT_TEAM: "364Q929542"
+        CODE_SIGN_STYLE: Automatic

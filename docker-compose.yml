@@ -1,0 +1,37 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: nullshift-db
+    environment:
+      POSTGRES_USER: nullshift
+      POSTGRES_PASSWORD: nullshift
+      POSTGRES_DB: nullshift
+    ports:
+      # 5433 on the host — this machine runs a local Postgres on 5432
+      - "5433:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nullshift -d nullshift"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: nullshift-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # 6380 on the host — this machine runs a local Redis on 6379
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:
+  redis-data:

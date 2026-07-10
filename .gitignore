@@ -1,0 +1,25 @@
+# Rust (Cargo.lock is committed — this is a binary crate)
+target/
+
+# macOS
+.DS_Store
+
+# Node / Next.js (web/)
+node_modules/
+.next/
+out/
+
+# Xcode / iOS (ios/)
+DerivedData/
+*.xcuserstate
+xcuserdata/
+build/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# xcodegen output (regenerate: cd ios && xcodegen generate)
+ios/NullShift.xcodeproj/
+ios/build-device/

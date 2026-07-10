@@ -1,0 +1,8 @@
+# Deploy image for the shared VPS. The binary is cross-compiled on the dev
+# Mac (cargo zigbuild --target x86_64-unknown-linux-musl) — NEVER build Rust
+# on the shared box (see config.txt incident note). Migrations are embedded
+# in the binary via sqlx::migrate!.
+FROM alpine:3.20
+COPY target/x86_64-unknown-linux-musl/release/nullshift-backend /usr/local/bin/nullshift-backend
+EXPOSE 8080
+CMD ["nullshift-backend"]
