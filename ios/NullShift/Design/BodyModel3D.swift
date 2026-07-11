@@ -85,9 +85,10 @@ enum BodyHologram {
     /// radius as fraction of height). A generic upright figure; the waist
     /// and hip rows of the torso get scaled to the user's measured semi-axes.
     private static let torsoProfile: [(t: Double, r: Double)] = [
-        (0.000, 0.010), (0.020, 0.048), (0.060, 0.062), (0.105, 0.046),
-        (0.132, 0.030), (0.155, 0.064), (0.185, 0.110), (0.215, 0.106),
-        (0.250, 0.100), (0.310, 0.090), (0.380, 0.078), (0.430, 0.086),
+        // Big rounded head (soft anime/chibi proportions) → slim neck.
+        (0.000, 0.018), (0.016, 0.064), (0.050, 0.090), (0.082, 0.092), (0.112, 0.074),
+        (0.142, 0.034), (0.166, 0.060), (0.196, 0.108), (0.224, 0.104),
+        (0.258, 0.098), (0.312, 0.088), (0.380, 0.078), (0.430, 0.086),
         (0.470, 0.094), (0.520, 0.090), (0.560, 0.074), (0.585, 0.042),
     ]
     private static let legProfile: [(t: Double, r: Double)] = [
@@ -147,31 +148,35 @@ enum BodyHologram {
         petLight.position = SCNVector3(0.55, 0.0, 0.9)
         scene.rootNode.addChildNode(petLight)
 
-        // Holographic pedestal: soft disc + two glowing rings.
-        let disc = SCNNode(geometry: SCNCylinder(radius: 0.33, height: 0.004))
+        // Holographic pedestal: glowing disc + two bright rings (mint + violet).
+        let disc = SCNNode(geometry: SCNCylinder(radius: 0.34, height: 0.004))
         let discMat = SCNMaterial()
         discMat.lightingModel = .constant
         discMat.diffuse.contents = UIColor.black
-        discMat.emission.contents = UIColor(red: 0.20, green: 0.70, blue: 0.49, alpha: 1)
-        discMat.transparency = 0.14
+        discMat.emission.contents = UIColor(red: 0.24, green: 0.86, blue: 0.72, alpha: 1)
+        discMat.transparency = 0.22
+        discMat.blendMode = .add
+        discMat.writesToDepthBuffer = false
         disc.geometry?.firstMaterial = discMat
         disc.position.y = -0.505
         scene.rootNode.addChildNode(disc)
 
-        let innerRing = SCNNode(geometry: SCNTorus(ringRadius: 0.34, pipeRadius: 0.0035))
+        let innerRing = SCNNode(geometry: SCNTorus(ringRadius: 0.35, pipeRadius: 0.006))
         let innerMat = SCNMaterial()
         innerMat.lightingModel = .constant
-        innerMat.emission.contents = UIColor(red: 0.20, green: 0.70, blue: 0.49, alpha: 1)
-        innerMat.transparency = 0.55
+        innerMat.emission.contents = UIColor(red: 0.28, green: 0.95, blue: 0.78, alpha: 1)
+        innerMat.blendMode = .add
+        innerMat.writesToDepthBuffer = false
         innerRing.geometry?.firstMaterial = innerMat
         innerRing.position.y = -0.5
         scene.rootNode.addChildNode(innerRing)
 
-        let outerRing = SCNNode(geometry: SCNTorus(ringRadius: 0.42, pipeRadius: 0.0028))
+        let outerRing = SCNNode(geometry: SCNTorus(ringRadius: 0.44, pipeRadius: 0.0045))
         let outerMat = SCNMaterial()
         outerMat.lightingModel = .constant
-        outerMat.emission.contents = UIColor(red: 0.54, green: 0.39, blue: 0.82, alpha: 1)
-        outerMat.transparency = 0.4
+        outerMat.emission.contents = UIColor(red: 0.60, green: 0.48, blue: 0.98, alpha: 1)
+        outerMat.blendMode = .add
+        outerMat.writesToDepthBuffer = false
         outerRing.geometry?.firstMaterial = outerMat
         outerRing.position.y = -0.5
         scene.rootNode.addChildNode(outerRing)
@@ -188,14 +193,17 @@ enum BodyHologram {
             ])))
         }
 
-        // Scan beam sweeping the figure.
+        // Scan beam sweeping the figure — bright mint slab, blooms as it passes.
         if animated {
-            let beam = SCNNode(geometry: SCNBox(width: 0.5, height: 0.004, length: 0.5, chamferRadius: 0))
+            let beam = SCNNode(geometry: SCNBox(width: 0.52, height: 0.006, length: 0.52, chamferRadius: 0))
             let beamMat = SCNMaterial()
-            beamMat.emission.contents = UIColor(red: 0.20, green: 0.70, blue: 0.49, alpha: 1)
+            beamMat.lightingModel = .constant
+            beamMat.emission.contents = UIColor(red: 0.30, green: 0.98, blue: 0.80, alpha: 1)
             beamMat.diffuse.contents = UIColor.black
-            beamMat.transparency = 0.4
+            beamMat.transparency = 0.5
+            beamMat.blendMode = .add
             beamMat.isDoubleSided = true
+            beamMat.writesToDepthBuffer = false
             beam.geometry?.firstMaterial = beamMat
             beam.position.y = -0.55
             beam.runAction(.repeatForever(.sequence([
@@ -239,12 +247,62 @@ enum BodyHologram {
         ambient.light?.categoryBitMask = 3
         scene.rootNode.addChildNode(ambient)
 
+        // Floating sparkle motes around the figure — the "hologram dust".
+        if animated {
+            scene.rootNode.addChildNode(sparkles())
+        }
+
         let camera = SCNNode()
         camera.camera = SCNCamera()
         camera.position = SCNVector3(0, 0.07, 1.32)
+        // Volumetric glow — emissive surfaces bloom into a soft halo.
+        camera.camera?.wantsHDR = true
+        camera.camera?.bloomIntensity = 0.45
+        camera.camera?.bloomThreshold = 0.86
+        camera.camera?.bloomBlurRadius = 6
+        camera.camera?.wantsExposureAdaptation = false
         scene.rootNode.addChildNode(camera)
 
         return scene
+    }
+
+    /// A cloud of tiny glowing motes drifting around the hologram.
+    private static func sparkles() -> SCNNode {
+        let root = SCNNode()
+        let tints = [
+            UIColor(red: 0.45, green: 0.95, blue: 0.92, alpha: 1),
+            UIColor(red: 0.54, green: 0.45, blue: 0.90, alpha: 1),
+            UIColor.white,
+        ]
+        for i in 0..<16 {
+            // Deterministic scatter in a cylinder around the figure.
+            let a = Double(i) / 16 * 2 * .pi * 2.6
+            let radius = 0.28 + Double((i * 37) % 20) / 100.0
+            let y = -0.45 + Double((i * 53) % 100) / 100.0
+            let size = 0.006 + Double((i * 17) % 5) / 1000.0
+            let mote = SCNNode(geometry: SCNSphere(radius: size))
+            let mat = SCNMaterial()
+            mat.lightingModel = .constant
+            mat.emission.contents = tints[i % tints.count]
+            mat.blendMode = .add
+            mat.writesToDepthBuffer = false
+            mote.geometry?.firstMaterial = mat
+            mote.position = SCNVector3(Float(cos(a) * radius), Float(y), Float(sin(a) * radius))
+            let dur = 2.4 + Double((i * 29) % 30) / 10.0
+            mote.runAction(.repeatForever(.sequence([
+                .group([
+                    .moveBy(x: 0, y: 0.12, z: 0, duration: dur),
+                    .fadeOpacity(to: 0.2, duration: dur),
+                ]),
+                .group([
+                    .moveBy(x: 0, y: -0.12, z: 0, duration: dur),
+                    .fadeOpacity(to: 1, duration: dur),
+                ]),
+            ])))
+            root.addChildNode(mote)
+        }
+        root.categoryBitMask = 1
+        return root
     }
 
     // MARK: - Nhím Tím (the pet, raised by activity)
@@ -440,7 +498,14 @@ enum BodyHologram {
     ) -> SCNNode {
         let node = SCNNode(geometry: loft(profile, aspect: aspect, waistScale: waistScale, hipScale: hipScale))
         node.geometry?.firstMaterial = solidMaterial()
-        let wire = SCNNode(geometry: loft(profile, aspect: aspect, waistScale: waistScale, hipScale: hipScale))
+        // A COARSE wire twin — distinct glowing grid lines, not the dense 64×36
+        // mesh (which merged into a solid cyan wash + bloom that clipped the
+        // whole body to white). Sparse lines read as a proper sci-fi wireframe
+        // and let the teal→violet gradient show through.
+        let wire = SCNNode(geometry: loft(
+            profile, aspect: aspect, waistScale: waistScale, hipScale: hipScale,
+            slices: 22, segments: 14
+        ))
         wire.scale = SCNVector3(1.02, 1.004, 1.02)
         wire.geometry?.firstMaterial = wireMaterial()
         node.addChildNode(wire)
@@ -459,23 +524,52 @@ enum BodyHologram {
         )
     }
 
+    /// Vertical teal→purple gradient for the hologram skin.
+    private static let holoGradient: UIImage = {
+        let size = CGSize(width: 8, height: 256)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            let cg = ctx.cgContext
+            let colors = [
+                UIColor(red: 0.24, green: 0.86, blue: 0.72, alpha: 1).cgColor, // mint-teal (bottom)
+                UIColor(red: 0.32, green: 0.72, blue: 0.86, alpha: 1).cgColor, // cyan
+                UIColor(red: 0.54, green: 0.45, blue: 0.90, alpha: 1).cgColor, // violet (top)
+            ]
+            let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                  colors: colors as CFArray, locations: [0, 0.5, 1])!
+            cg.drawLinearGradient(grad, start: CGPoint(x: 0, y: size.height),
+                                  end: CGPoint(x: 0, y: 0), options: [])
+        }
+    }()
+
     private static func solidMaterial() -> SCNMaterial {
+        // Translucent glowing hologram skin, teal→violet gradient.
+        // IMPORTANT: under `.constant` lighting SceneKit lights the surface from
+        // AMBIENT, not the diffuse texture — a `diffuse.contents = image` renders
+        // flat white (proven: torso sampled pure 255,255,255). So the gradient is
+        // driven through `emission`, which IS shown under constant (same as the
+        // wire's cyan). Alpha-blended + front-faces-only + depth write keeps it a
+        // single coherent glassy body instead of additive-summing to white.
         let m = SCNMaterial()
-        m.lightingModel = .physicallyBased
-        m.diffuse.contents = UIColor(red: 0.09, green: 0.15, blue: 0.16, alpha: 1)
-        m.metalness.contents = 0.9
-        m.roughness.contents = 0.26
-        m.emission.contents = UIColor(red: 0.04, green: 0.20, blue: 0.16, alpha: 1)
+        m.lightingModel = .constant
+        m.diffuse.contents = UIColor.black
+        m.emission.contents = holoGradient
+        m.emission.intensity = 0.9
+        m.transparency = 0.62
+        m.isDoubleSided = false
+        m.writesToDepthBuffer = true
         return m
     }
 
     private static func wireMaterial() -> SCNMaterial {
+        // Bright neon rim wireframe over the skin.
         let m = SCNMaterial()
         m.fillMode = .lines
         m.lightingModel = .constant
-        m.emission.contents = UIColor(red: 0.20, green: 0.70, blue: 0.49, alpha: 1)
-        m.transparency = 0.15
+        m.emission.contents = UIColor(red: 0.40, green: 0.92, blue: 0.90, alpha: 1)
+        m.transparency = 0.5
+        m.blendMode = .add
         m.isDoubleSided = true
+        m.writesToDepthBuffer = false
         return m
     }
 
@@ -485,14 +579,15 @@ enum BodyHologram {
         _ profile: [(t: Double, r: Double)],
         aspect: Double,
         waistScale: Double,
-        hipScale: Double
+        hipScale: Double,
+        slices: Int = 64,
+        segments: Int = 36
     ) -> SCNGeometry {
         let tStart = profile.first!.t
         let tEnd = profile.last!.t
-        let slices = 64
-        let segments = 36
         var vertices: [SCNVector3] = []
         var normals: [SCNVector3] = []
+        var uvs: [CGPoint] = []
         var indices: [Int32] = []
 
         var radii: [Double] = []
@@ -525,6 +620,8 @@ enum BodyHologram {
                     Float(sin(theta))
                 )
                 normals.append(normalized(n))
+                // v maps head(t=0)→top of the gradient image, feet(t=1)→bottom.
+                uvs.append(CGPoint(x: Double(s) / Double(segments), y: ts[i]))
             }
         }
 
@@ -541,6 +638,7 @@ enum BodyHologram {
             sources: [
                 SCNGeometrySource(vertices: vertices),
                 SCNGeometrySource(normals: normals),
+                SCNGeometrySource(textureCoordinates: uvs),
             ],
             elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)]
         )
