@@ -24,6 +24,9 @@ struct MainView: View {
             case .scanCam: ScanCamView()
             case .scanProc: ScanProcView()
             case .scanRes: ScanResView()
+            case .catchIntro: CatchIntroView()
+            case .catchCam: CatchCamView()
+            case .catchDex: CritterDexView()
             }
         }
         .overlay { CelebrationHost() }

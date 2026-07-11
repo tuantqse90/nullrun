@@ -28,7 +28,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera dùng để quét hình bóng cơ thể — ảnh xử lý ngay trên máy, không lưu, không tải lên.</string>
+	<string>Camera dùng để quét hình bóng cơ thể và để bắt thú cưng đường phố (chó/mèo) — ảnh xử lý ngay trên máy, không tải lên đâu cả.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Kết nối tới máy chủ phát triển trên máy Mac trong cùng mạng Wi-Fi.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

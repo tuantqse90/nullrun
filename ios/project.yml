@@ -76,8 +76,8 @@ targets:
         NSMotionUsageDescription: >-
           Dữ liệu chuyển động giúp xác thực hoạt động thật và chống gian lận.
         NSCameraUsageDescription: >-
-          Camera dùng để quét hình bóng cơ thể — ảnh xử lý ngay trên máy,
-          không lưu, không tải lên.
+          Camera dùng để quét hình bóng cơ thể và để bắt thú cưng đường phố
+          (chó/mèo) — ảnh xử lý ngay trên máy, không tải lên đâu cả.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nullshift.app

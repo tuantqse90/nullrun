@@ -16,7 +16,8 @@ struct HomeView: View {
                     levelCard.riseIn(4)
                     questsCard.riseIn(5)
                     gamesCard.riseIn(6)
-                    wheelBanner.riseIn(7)
+                    critterCard.riseIn(7)
+                    wheelBanner.riseIn(8)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -236,6 +237,31 @@ struct HomeView: View {
                             .font(.mono(13, .regular)).foregroundStyle(Theme.muted)
                     }
                     Text("Thử thách sức khoẻ — nhận điểm mỗi ngày")
+                        .font(.viet(13)).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: 0xC6BEB0))
+            }
+            .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+            .background(Theme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: Theme.cardShadow, radius: 5, y: 2)
+        }
+        .buttonStyle(PressScale())
+    }
+
+    private var critterCard: some View {
+        Button { app.screen = .catchIntro } label: {
+            HStack(spacing: 13) {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Theme.orangeBg)
+                    .frame(width: 46, height: 46)
+                    .overlay {
+                        Image(systemName: "pawprint.fill").font(.system(size: 20)).foregroundStyle(Theme.orangeDeep)
+                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Thú cưng đường phố").font(.viet(15, .bold)).foregroundStyle(Theme.ink)
+                    Text("Bắt chó mèo ngoài đường vào Sổ Bạn Nhỏ 🐾")
                         .font(.viet(13)).foregroundStyle(Theme.muted)
                 }
                 Spacer()

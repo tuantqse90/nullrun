@@ -17,6 +17,15 @@
 
 ## Log
 
+### 2026-07-11 (Thú Cưng Đường Phố — bắt chó mèo thật kiểu Pokémon-GO)
+
+Founder đặt hàng trực tiếp màn hình + cơ chế (không phải mình tự vẽ) → build trọn bộ, bám design system.
+
+- [x] **Scout workflow (3 agent song song)** chốt: Vision `VNRecognizeAnimalsRequest` (on-device, chó/mèo, không tải model — analog của body-scan segmentation); cơ chế **ná bắn mồi** (kéo-thả slingshot, vui 5/5 khả thi 5/5, ngắm bằng kỹ năng); lưu **on-device** (Documents+JSON, ảnh KHÔNG upload — đúng privacy), **KHÔNG mint điểm** (bắt mèo ≠ vận động → economy firewall), chỉ "cấp nhà sưu tầm" cosmetic
+- [x] **`Core/CritterEngine.swift`**: camera SAU, `AVCaptureVideoDataOutput` throttle ~5Hz chạy VNRecognizeAnimalsRequest + `AVCapturePhotoOutput` chụp ảnh nét khi bắt; map bbox Vision→reticle qua `layerRectConverted`. **`Core/CritterStore.swift`**: bộ sưu tập on-device, ảnh Documents (excludeFromBackup), collector XP/level/badge cosmetic. **`Screens/CatchViews.swift`**: intro (có disclaimer "nhẹ nhàng đừng đuổi các bé") + game bắt (5 state: tìm→thấy→ngắm→ném→bắt/hụt, ná co giãn + đường bay parabola + reticle lock xanh + confetti + tên VN dễ thương tự sinh) + Sổ Bạn Nhỏ (Pokédex grid). Vào từ card Home; Reduce Motion tôn trọng
+- [x] **Review workflow (10 agent adversarial) bắt 4 bug — 1 CRITICAL mà simulator KHÔNG THỂ thấy** (không có camera): `captureOutput` gọi `queue.sync` trên chính serial queue đang chạy → Vision deadlock frame đầu, cả feature chết trên máy thật. Fix. + 3 medium: reticle clamp tạo vùng chết nửa dưới khung (mèo dưới chân không bắt được), hysteresis xoá `held` giữa lúc ném (mồi biến mất + bắt trúng mà mất im lặng), `CritterStore.load()` nuốt decode-lỗi → catch tiếp ghi đè xoá sạch bộ sưu tập (giờ backup file hỏng). 2 finding bị bác (ảnh 720p không phình RAM, start/stop race không thật)
+- [x] Verify: build sạch, screenshot intro + Sổ Bạn Nhỏ (collector cấp 2 + huy hiệu + grid), camera-fallback không crash trên sim; UI test 3/3 pass (card Home mới không phá flow). Game đầy đủ (ná + Vision) cần máy thật — device binary build sẵn chờ cắm iPhone
+
 ### 2026-07-11 (Bug hunt toàn project — 33-agent review, fix 24 bug)
 
 Workflow 7 lens (backend-new/economy/security, ios-core/screens, api-contract, web) + adversarial verify chéo → 25 confirmed, 1 refuted (SceneView rebuild — SwiftUI prune body đúng). Fix 24, deploy + verify hết:

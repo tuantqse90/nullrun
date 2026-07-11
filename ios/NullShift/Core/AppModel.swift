@@ -17,10 +17,11 @@ enum Screen: Equatable {
     case games
     case duel
     case scanIntro, scanCam, scanProc, scanRes
+    case catchIntro, catchCam, catchDex
 
     var isDark: Bool {
         switch self {
-        case .run, .locked, .scanCam: true
+        case .run, .locked, .scanCam, .catchCam: true
         default: false
         }
     }
@@ -30,7 +31,8 @@ enum Screen: Equatable {
         case (.home, .home), (.prerun, .prerun), (.run, .run), (.locked, .locked),
              (.rewards, .rewards), (.wheel, .wheel), (.scanIntro, .scanIntro),
              (.scanCam, .scanCam), (.scanProc, .scanProc), (.scanRes, .scanRes),
-             (.league, .league), (.guild, .guild), (.games, .games), (.duel, .duel):
+             (.league, .league), (.guild, .guild), (.games, .games), (.duel, .duel),
+             (.catchIntro, .catchIntro), (.catchCam, .catchCam), (.catchDex, .catchDex):
             true
         case (.summary(let a), .summary(let b)): a.id == b.id
         case (.voucher(let a), .voucher(let b)): a.id == b.id
@@ -104,6 +106,9 @@ final class AppModel: ObservableObject {
         // design QA until the real Core ML engine lands.
         case "scancam": screen = .scanCam
         case "scanres": screen = .scanRes
+        case "catch": screen = .catchIntro
+        case "catchcam": screen = .catchCam
+        case "dex": screen = .catchDex
         default: break
         }
         // Force-show a celebration for design QA (simulator only).
