@@ -123,6 +123,7 @@ struct CatchCamView: View {
     @State private var caughtImage: UIImage?
     @State private var celebrate = false
     @State private var flashMiss = false
+    @State private var cardShown = false
 
     private let aimGain: CGFloat = 1.9
 
@@ -387,47 +388,68 @@ struct CatchCamView: View {
     // MARK: result card
 
     private func caughtCard(_ c: CaughtCritter) -> some View {
-        VStack(spacing: 14) {
-            Text("Bắt được rồi! 🎉").font(.viet(24, .heavy)).foregroundStyle(.white)
-            if let img = caughtImage {
-                Image(uiImage: img)
-                    .resizable().scaledToFill()
-                    .frame(width: 210, height: 210)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white, lineWidth: 4))
-                    .rotationEffect(.degrees(-3))
-                    .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
-                    .popIn()
-            }
-            Text("\(c.critter.treat) \(c.nickname)")
-                .font(.viet(20, .bold)).foregroundStyle(.white)
-            Text("Đã thêm vào Sổ Bạn Nhỏ · +10 điểm sưu tầm")
-                .font(.viet(13)).foregroundStyle(Color(hex: 0xE3D8F7))
-            HStack(spacing: 12) {
-                Button {
-                    caught = nil
-                    caughtImage = nil
-                    missesLeft = 3
-                    clearHeld()
-                } label: {
-                    Text("Bắt tiếp").font(.viet(15, .bold)).foregroundStyle(Theme.orangeDeep)
-                        .padding(.horizontal, 22).padding(.vertical, 13)
-                        .background(.white).clipShape(Capsule())
+        let r = c.rarityValue
+        return ZStack {
+            RadialGradient(
+                colors: [r.glow.opacity(0.55), .black.opacity(0.78)],
+                center: .center, startRadius: 30, endRadius: 520
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                VStack(spacing: 3) {
+                    Text(rarityHeadline(r))
+                        .font(.viet(15, .heavy))
+                        .foregroundStyle(r.frame.first ?? .white)
+                    Text("Bắt được rồi!")
+                        .font(.viet(26, .heavy)).foregroundStyle(.white)
                 }
-                Button {
-                    app.screen = .catchDex
-                } label: {
-                    Text("Xem Sổ").font(.viet(15, .bold)).foregroundStyle(.white)
-                        .padding(.horizontal, 22).padding(.vertical, 13)
-                        .background(.white.opacity(0.2)).clipShape(Capsule())
+                .popIn()
+
+                HolographicCard(critter: c, image: caughtImage, width: 270)
+                    .scaleEffect(cardShown ? 1 : 0.35)
+                    .rotationEffect(.degrees(cardShown ? 0 : -14))
+                    .opacity(cardShown ? 1 : 0)
+
+                Text("Đã thêm vào Sổ Bạn Nhỏ · +\(r.xpReward) điểm sưu tầm")
+                    .font(.viet(13, .semibold)).foregroundStyle(Color(hex: 0xE3D8F7))
+
+                HStack(spacing: 12) {
+                    Button {
+                        cardShown = false
+                        caught = nil
+                        caughtImage = nil
+                        missesLeft = 3
+                        clearHeld()
+                    } label: {
+                        Text("Bắt tiếp").font(.viet(15, .bold)).foregroundStyle(Theme.orangeDeep)
+                            .padding(.horizontal, 22).padding(.vertical, 13)
+                            .background(.white).clipShape(Capsule())
+                    }
+                    Button {
+                        app.screen = .catchDex
+                    } label: {
+                        Text("Xem Sổ").font(.viet(15, .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 22).padding(.vertical, 13)
+                            .background(.white.opacity(0.2)).clipShape(Capsule())
+                    }
                 }
             }
-            .padding(.top, 6)
         }
-        .padding(30)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black.opacity(0.62))
-        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.62).delay(0.15)) {
+                cardShown = true
+            }
+        }
+    }
+
+    private func rarityHeadline(_ r: CritterRarity) -> String {
+        switch r {
+        case .common: "⭐ Đã kết bạn"
+        case .rare: "✨ HIẾM ✨"
+        case .epic: "💎 CỰC HIẾM 💎"
+        case .legendary: "👑 HUYỀN THOẠI 👑"
+        }
     }
 
     private var permissionNotice: some View {
@@ -515,10 +537,28 @@ private struct LandingReticle: View {
 struct CritterDexView: View {
     @EnvironmentObject private var app: AppModel
     @State private var collection = CritterStore.load()
+    @State private var selected: CaughtCritter?
 
-    private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+    private let cols = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
+        ZStack {
+            dexBody
+            if let selected {
+                cardDetail(selected)
+            }
+        }
+        #if DEBUG
+        .onAppear {
+            // Design-QA: auto-open the first card's detail.
+            if ProcessInfo.processInfo.environment["DEV_CARD"] != nil {
+                selected = collection.critters.first
+            }
+        }
+        #endif
+    }
+
+    private var dexBody: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 0) {
@@ -546,9 +586,18 @@ struct CritterDexView: View {
                     if collection.critters.isEmpty {
                         emptyState.padding(.top, 40)
                     } else {
-                        LazyVGrid(columns: cols, spacing: 12) {
+                        LazyVGrid(columns: cols, spacing: 14) {
                             ForEach(Array(collection.critters.enumerated()), id: \.element.id) { i, c in
-                                critterCell(c).riseIn(min(i, 6))
+                                GeometryReader { geo in
+                                    CritterCard(critter: c, image: CritterStore.image(c), width: geo.size.width, animateHolo: false)
+                                }
+                                .aspectRatio(1 / 1.42, contentMode: .fit)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    Haptics.light()
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { selected = c }
+                                }
+                                .riseIn(min(i, 6))
                             }
                         }
                         .padding(.horizontal, 20)
@@ -603,34 +652,25 @@ struct CritterDexView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func critterCell(_ c: CaughtCritter) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                if let img = CritterStore.image(c) {
-                    Image(uiImage: img)
-                        .resizable().scaledToFill()
-                        .frame(height: 150).frame(maxWidth: .infinity)
-                        .clipped()
-                } else {
-                    Rectangle().fill(Theme.dimBg).frame(height: 150)
-                        .overlay { Text(c.critter.treat).font(.system(size: 40)) }
+    /// Full-screen holographic card viewer — drag to tilt it in 3D.
+    private func cardDetail(_ c: CaughtCritter) -> some View {
+        ZStack {
+            Color.black.opacity(0.78).ignoresSafeArea()
+                .onTapGesture { withAnimation { selected = nil } }
+            VStack(spacing: 18) {
+                HolographicCard(critter: c, image: CritterStore.image(c), width: 300)
+                Text("Nghiêng thẻ để xem hiệu ứng ✨")
+                    .font(.viet(12.5)).foregroundStyle(.white.opacity(0.7))
+                Button {
+                    withAnimation { selected = nil }
+                } label: {
+                    Text("Đóng").font(.viet(15, .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 26).padding(.vertical, 12)
+                        .background(.white.opacity(0.2)).clipShape(Capsule())
                 }
-                Text(c.species == "cat" ? "🐱" : "🐶")
-                    .font(.system(size: 15))
-                    .padding(7)
-                    .background(.white)
-                    .clipShape(Circle())
-                    .padding(8)
             }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(c.nickname).font(.viet(14.5, .bold))
-                Text(Self.dateLabel(c.caughtAt)).font(.viet(11.5)).foregroundStyle(Theme.faint)
-            }
-            .padding(EdgeInsets(top: 9, leading: 11, bottom: 11, trailing: 11))
         }
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: Theme.cardShadow, radius: 5, y: 2)
+        .transition(.opacity)
     }
 
     private var emptyState: some View {
@@ -643,12 +683,6 @@ struct CritterDexView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private static func dateLabel(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "vi_VN")
-        f.dateFormat = "d MMM · HH:mm"
-        return f.string(from: d)
-    }
 }
 
 // MARK: - helpers

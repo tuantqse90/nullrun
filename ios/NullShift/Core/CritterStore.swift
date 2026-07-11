@@ -14,6 +14,9 @@ struct CaughtCritter: Codable, Identifiable {
     let nickname: String
     let caughtAt: Date
     let photoFile: String      // filename inside the critters dir
+    // Optional so pre-existing collections (before rarity/number) still decode.
+    let rarity: String?        // CritterRarity raw value
+    let number: Int?           // collector number (#001…)
 
     var critter: Critter { Critter(rawValue: species) ?? .cat }
 }
@@ -81,16 +84,19 @@ enum CritterStore {
         if let jpeg = image.jpegData(compressionQuality: 0.82) {
             try? jpeg.write(to: dir.appendingPathComponent(file), options: .atomic)
         }
+        var coll = load()
+        let rarity = CritterRarity.roll()
         let entry = CaughtCritter(
             id: id,
             species: species.rawValue,
             nickname: randomName(for: species),
             caughtAt: Date(),
-            photoFile: file
+            photoFile: file,
+            rarity: rarity.rawValue,
+            number: coll.critters.count + 1
         )
-        var coll = load()
         coll.critters.insert(entry, at: 0)
-        coll.collectorXP += 10
+        coll.collectorXP += rarity.xpReward
         save(coll)
         return entry
     }
