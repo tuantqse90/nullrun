@@ -50,13 +50,36 @@ pub async fn chat(
     if json_mode {
         body["response_format"] = json!({"type": "json_object"});
     }
+    complete(config, body).await
+}
 
+/// Chat completion over a full pre-built message array (system + turns) — for
+/// multi-turn conversations. Same client and error handling as `chat`.
+pub async fn chat_messages(
+    config: &AiConfig,
+    messages: &[Value],
+    max_tokens: u32,
+) -> Result<String, AppError> {
+    let body = json!({
+        "model": config.model,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": max_tokens,
+    });
+    complete(config, body).await
+}
+
+/// Shared request path: POST /chat/completions and pull out the reply text.
+async fn complete(config: &AiConfig, body: Value) -> Result<String, AppError> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(25))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| AppError::Internal(format!("ai client: {e}")))?;
     let resp = client
-        .post(format!("{}/chat/completions", config.base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/chat/completions",
+            config.base_url.trim_end_matches('/')
+        ))
         .bearer_auth(&config.api_key)
         .json(&body)
         .send()
@@ -69,7 +92,9 @@ pub async fn chat(
         .await
         .map_err(|e| AppError::Internal(format!("ai response: {e}")))?;
     if !status.is_success() {
-        return Err(AppError::Internal(format!("ai upstream {status}: {payload}")));
+        return Err(AppError::Internal(format!(
+            "ai upstream {status}: {payload}"
+        )));
     }
     payload["choices"][0]["message"]["content"]
         .as_str()
@@ -79,6 +104,10 @@ pub async fn chat(
 
 /// Best-effort JSON extraction — models occasionally wrap JSON in fences.
 pub fn parse_json(raw: &str) -> Option<Value> {
-    let trimmed = raw.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```");
+    let trimmed = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```");
     serde_json::from_str(trimmed.trim()).ok()
 }

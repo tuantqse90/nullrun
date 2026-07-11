@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me/points", get(my_points))
         .route("/me/insight", get(my_insight))
+        .route("/me/coach/chat", post(coach_chat))
         .route("/leaderboard/weekly", get(weekly_leaderboard))
         .route("/league", get(my_league))
         .route("/challenges", get(list_challenges))
@@ -333,19 +334,23 @@ async fn my_points(user: AuthUser, State(state): State<AppState>) -> Result<Json
     })))
 }
 
-/// AI coach — a short, personalized nudge phrased from the user's REAL
-/// activity numbers. Same locked architecture as the VETC AI: the model only
-/// PHRASES the provided stats (never invents a figure) and the endpoint falls
-/// back to a deterministic template when no key is set — the demo never dies
-/// on a missing credential. Guardrail #4: the coach talks about ACTIVITY and
-/// CONSISTENCY only — never body/weight, never "less = better". It mints
-/// nothing (economy firewall): this is copy, not currency.
-async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+/// Real activity context for the AI coach features — the user's genuine
+/// weekly numbers, never anything invented. Shared by the insight nudge and
+/// the coach chat so both feed the model the SAME factual stat block.
+struct CoachCtx {
+    stats: Value,
+    name: String,
+    weekly_km: f64,
+    goal: f64,
+    streak: i32,
+}
+
+async fn coach_context(state: &AppState, user_id: Uuid) -> Result<CoachCtx, AppError> {
     let me: MeRow = sqlx::query_as(
         "SELECT points_balance, streak_current, streak_best, weekly_goal_km, display_name
          FROM users WHERE id = $1",
     )
-    .bind(user.user_id)
+    .bind(user_id)
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -354,7 +359,7 @@ async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Jso
         "SELECT COALESCE(SUM(distance_m), 0)::float8 / 1000.0 FROM activity_sessions
          WHERE user_id = $1 AND status = 'completed' AND verdict = 'clean' AND started_at >= $2",
     )
-    .bind(user.user_id)
+    .bind(user_id)
     .bind(rules::vn_week_start_utc())
     .fetch_one(&state.db)
     .await?;
@@ -363,7 +368,7 @@ async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Jso
         "SELECT COALESCE(SUM(amount), 0)::bigint FROM points_ledger
          WHERE user_id = $1 AND season = $2 AND amount > 0",
     )
-    .bind(user.user_id)
+    .bind(user_id)
     .bind(&season)
     .fetch_one(&state.db)
     .await?;
@@ -371,7 +376,7 @@ async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Jso
         "SELECT COALESCE(SUM(amount), 0)::bigint FROM points_ledger
          WHERE user_id = $1 AND amount > 0 AND created_at >= $2",
     )
-    .bind(user.user_id)
+    .bind(user_id)
     .bind(rules::vn_day_start_utc())
     .fetch_one(&state.db)
     .await?;
@@ -379,19 +384,33 @@ async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Jso
 
     let name = me.display_name.clone().unwrap_or_default();
     let goal = me.weekly_goal_km.max(1.0);
-    let remaining = (goal - weekly_km).max(0.0);
-    let pct = ((weekly_km / goal) * 100.0).round() as i64;
-
-    // Compact, factual stat block for the model to phrase (never invent).
     let stats = json!({
         "ten": name,
         "km_tuan": (weekly_km * 10.0).round() / 10.0,
         "muc_tieu_km_tuan": (goal * 10.0).round() / 10.0,
-        "phan_tram_muc_tieu": pct,
+        "phan_tram_muc_tieu": ((weekly_km / goal) * 100.0).round() as i64,
         "chuoi_ngay": me.streak_current,
         "diem_hom_nay": today_earned,
         "hang": tier,
     });
+    Ok(CoachCtx {
+        stats,
+        name,
+        weekly_km,
+        goal,
+        streak: me.streak_current,
+    })
+}
+
+/// AI coach — a short, personalized nudge phrased from the user's REAL
+/// activity numbers. Same locked architecture as the VETC AI: the model only
+/// PHRASES the provided stats (never invents a figure) and the endpoint falls
+/// back to a deterministic template when no key is set — the demo never dies
+/// on a missing credential. Guardrail #4: the coach talks about ACTIVITY and
+/// CONSISTENCY only — never body/weight, never "less = better". It mints
+/// nothing (economy firewall): this is copy, not currency.
+async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+    let c = coach_context(&state, user.user_id).await?;
 
     if let Some(config) = ai::AiConfig::from_env() {
         let system = "Bạn là huấn luyện viên chạy bộ thân thiện trong app Null Run. Viết một lời \
@@ -400,7 +419,7 @@ async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Jso
             tiêu tuần. TUYỆT ĐỐI không nhắc tới cân nặng/giảm cân/hình thể, không hàm ý 'ít hơn là \
             tốt hơn'. Giọng ấm áp, khích lệ, có thể dùng 1 emoji. \
             Trả về JSON: {\"headline\": \"...(<=48 ký tự)\", \"body\": \"...(<=140 ký tự)\"}";
-        let user_msg = format!("Số liệu tuần này của người dùng: {stats}");
+        let user_msg = format!("Số liệu tuần này của người dùng: {}", c.stats);
         match ai::chat(&config, system, &user_msg, true).await {
             Ok(raw) => {
                 if let Some(parsed) = ai::parse_json(&raw) {
@@ -409,7 +428,7 @@ async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Jso
                             "ai": true,
                             "headline": parsed["headline"],
                             "body": parsed["body"],
-                            "stats": stats,
+                            "stats": c.stats.clone(),
                         })));
                     }
                 }
@@ -419,13 +438,14 @@ async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Jso
     }
 
     // Deterministic template — the demo never dies on a missing key.
-    let (headline, body) =
-        insight_template(&name, weekly_km, goal, remaining, pct, me.streak_current);
+    let remaining = (c.goal - c.weekly_km).max(0.0);
+    let pct = ((c.weekly_km / c.goal) * 100.0).round() as i64;
+    let (headline, body) = insight_template(&c.name, c.weekly_km, c.goal, remaining, pct, c.streak);
     Ok(Json(json!({
         "ai": false,
         "headline": headline,
         "body": body,
-        "stats": stats,
+        "stats": c.stats,
     })))
 }
 
@@ -469,6 +489,126 @@ fn insight_template(
             format!(
                 "{hi}! Bạn đi được {weekly_km:.1}/{goal:.0} km, còn {remaining:.1} km nữa là chạm mốc.{streak_tail}"
             ),
+        )
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ChatMsg {
+    role: String,
+    content: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ChatBody {
+    messages: Vec<ChatMsg>,
+}
+
+/// System prompt for the in-app health coach ("Nhím Coach"). Scope is limited
+/// to running/activity + healthy eating, and the SAFETY block encodes the
+/// disordered-eating (#4) and medical-advice (#6) guardrails directly into the
+/// model's instructions: no extreme calorie/weight-loss advice, no diagnosis,
+/// disclaimers, and a soft-stop that redirects to a professional.
+const COACH_SYSTEM: &str = "Bạn là \"Nhím Coach\" — huấn luyện viên sức khoẻ thân thiện trong app \
+    Null Run, dành cho người Việt. \
+    PHẠM VI: chỉ tư vấn về CHẠY BỘ / VẬN ĐỘNG và ĂN UỐNG LÀNH MẠNH (ưu tiên món ăn Việt Nam). \
+    Câu hỏi ngoài phạm vi thì nhẹ nhàng kéo về chủ đề sức khoẻ. \
+    Dùng số liệu THẬT của người dùng để cá nhân hoá, nhưng KHÔNG bịa thêm con số. \
+    AN TOÀN (bắt buộc): KHÔNG đặt mục tiêu calo cực đoan; KHÔNG cổ vũ nhịn ăn, giảm cân cấp tốc hay \
+    detox cực đoan; KHÔNG nói 'ăn càng ít càng tốt'; KHÔNG hứa giảm X kg; KHÔNG gọi món ăn là 'tội \
+    lỗi/xấu'. Khuyến khích ăn đủ chất, cân bằng, bền vững. Nếu người dùng nhắc tới nhịn đói, giảm \
+    cân cực đoan, ám ảnh cân nặng hay dấu hiệu rối loạn ăn uống → thể hiện quan tâm nhẹ nhàng, \
+    khuyên ăn uống cân bằng và GỢI Ý gặp chuyên gia dinh dưỡng/bác sĩ, không phán xét. KHÔNG chẩn \
+    đoán bệnh, KHÔNG kê thuốc/thực phẩm chức năng; nếu có triệu chứng y tế (đau ngực, chấn thương, \
+    chóng mặt…) → khuyên gặp bác sĩ. Đây là gợi ý chung về lối sống, KHÔNG thay thế tư vấn y tế. \
+    PHONG CÁCH: tiếng Việt, ấm áp, ngắn gọn, thực tế, dễ làm theo; có thể dùng emoji và gạch đầu \
+    dòng; trả lời tối đa khoảng 160 từ.";
+
+/// In-app health coach chat (tap the mascot). Multi-turn, client-held history;
+/// the server injects the guardrail system prompt + the user's REAL stats as
+/// context. AI via the locked DeepSeek client; template fallback when no key.
+/// Rate-capped per user (AI costs money). Mints nothing — pure guidance.
+async fn coach_chat(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Json(body): Json<ChatBody>,
+) -> Result<Json<Value>, AppError> {
+    if body.messages.is_empty() || body.messages.len() > 24 {
+        return Err(AppError::BadRequest("1..=24 messages".into()));
+    }
+    for m in &body.messages {
+        if m.role != "user" && m.role != "assistant" {
+            return Err(AppError::BadRequest("role must be user|assistant".into()));
+        }
+        if m.content.trim().is_empty() || m.content.chars().count() > 2000 {
+            return Err(AppError::BadRequest("message 1..=2000 chars".into()));
+        }
+    }
+    if body.messages.last().map(|m| m.role.as_str()) != Some("user") {
+        return Err(AppError::BadRequest("last message must be from user".into()));
+    }
+
+    // Per-user hourly cap — AI calls cost money; keep a script from draining it.
+    let rl_key = format!("coach:chat:{}", user.user_id);
+    let n: i64 = state.redis.incr(&rl_key).await?;
+    if n == 1 {
+        let _: bool = state.redis.expire(&rl_key, 3600, None).await?;
+    }
+    if n > 40 {
+        return Err(AppError::TooManyRequests);
+    }
+
+    let c = coach_context(&state, user.user_id).await?;
+
+    if let Some(config) = ai::AiConfig::from_env() {
+        let mut msgs = vec![
+            json!({"role": "system", "content": COACH_SYSTEM}),
+            json!({"role": "system", "content":
+                format!("Số liệu thật của người dùng (dùng để cá nhân hoá, đừng bịa thêm): {}", c.stats)}),
+        ];
+        for m in &body.messages {
+            msgs.push(json!({"role": m.role, "content": m.content}));
+        }
+        match ai::chat_messages(&config, &msgs, 700).await {
+            Ok(reply) if !reply.is_empty() => {
+                return Ok(Json(json!({ "ai": true, "reply": reply })));
+            }
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "coach chat ai failed, falling back"),
+        }
+    }
+
+    Ok(Json(json!({
+        "ai": false,
+        "reply": coach_fallback(&body.messages, &c),
+    })))
+}
+
+/// Template fallback when no AI key — keyword-routed, still safe & useful so
+/// the demo works offline. Never gives extreme/medical advice.
+fn coach_fallback(messages: &[ChatMsg], c: &CoachCtx) -> String {
+    let last = messages
+        .last()
+        .map(|m| m.content.to_lowercase())
+        .unwrap_or_default();
+    let food = ["ăn", "món", "dinh dưỡng", "thực đơn", "bữa"]
+        .iter()
+        .any(|k| last.contains(k));
+    if food {
+        "Gợi ý ăn uống cân bằng cho ngày vận động 🍚:\n\
+         • Trước khi chạy ~1h: chuối hoặc bánh mì + chút mật ong để có năng lượng.\n\
+         • Sau khi chạy: đạm + tinh bột — ức gà/cá, cơm/khoai, rau xanh.\n\
+         • Uống đủ nước cả ngày.\n\
+         Ăn đủ chất và đều đặn quan trọng hơn ăn kiêng nhé. Đây là gợi ý chung, không thay tư vấn y tế."
+            .into()
+    } else {
+        format!(
+            "Gợi ý chạy bộ cho bạn 🏃:\n\
+             • Tuần này bạn đã đi {:.1} km, mục tiêu {:.0} km — chia nhỏ 3–4 buổi cho nhẹ nhàng.\n\
+             • Khởi động 5 phút, chạy theo nhịp nói chuyện được, hạ nhiệt + giãn cơ cuối buổi.\n\
+             • Nghe cơ thể, nghỉ khi mệt. Đều đặn thắng cường độ.\n\
+             (Coach AI đang tạm nghỉ nên đây là gợi ý mẫu.)",
+            c.weekly_km, c.goal
         )
     }
 }

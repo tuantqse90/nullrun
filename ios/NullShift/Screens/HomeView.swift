@@ -4,6 +4,7 @@ struct HomeView: View {
     @EnvironmentObject private var app: AppModel
     @State private var goalPrompt = false
     @State private var goalInput = ""
+    @State private var showCoach = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,6 +40,15 @@ struct HomeView: View {
         }
         .background(Theme.bg)
         .task { await app.refresh() }
+        .sheet(isPresented: $showCoach) {
+            HealthChatView()
+                .presentationDragIndicator(.visible)
+        }
+        .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["DEV_COACH"] != nil { showCoach = true }
+            #endif
+        }
     }
 
     private var header: some View {
@@ -52,6 +62,16 @@ struct HomeView: View {
                 }
                 .frame(width: 54, height: 54)
                 .clipShape(Circle())
+                // Tap the mascot to chat with Nhím Coach (health/running/food).
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "bubble.left.fill")
+                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                        .padding(4).background(Theme.green).clipShape(Circle())
+                        .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2))
+                        .offset(x: 1, y: 1)
+                }
+                .contentShape(Circle())
+                .onTapGesture { Haptics.light(); showCoach = true }
                 VStack(alignment: .leading, spacing: 0) {
                     Text(app.dateLine).font(.viet(14)).foregroundStyle(Theme.muted)
                     Text(app.greeting).font(.viet(23, .bold))

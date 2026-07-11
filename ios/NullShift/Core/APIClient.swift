@@ -118,6 +118,14 @@ final class APIClient {
         try await send("GET", "/v1/me/insight")
     }
 
+    /// Send the running conversation to the health coach; returns its reply.
+    func coachChat(_ turns: [(role: String, content: String)]) async throws -> CoachChatReply {
+        struct Msg: Encodable { let role: String; let content: String }
+        struct Req: Encodable { let messages: [Msg] }
+        let req = Req(messages: turns.map { Msg(role: $0.role, content: $0.content) })
+        return try await send("POST", "/v1/me/coach/chat", body: req)
+    }
+
     func challenges() async throws -> [ChallengeItem] {
         try await send("GET", "/v1/challenges")
     }

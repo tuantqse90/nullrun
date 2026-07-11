@@ -47,6 +47,12 @@ struct CoachInsight: Codable {
     let body: String
 }
 
+/// One reply from the in-app health coach chat.
+struct CoachChatReply: Codable {
+    let ai: Bool
+    let reply: String
+}
+
 struct GameStatus: Codable, Identifiable {
     let code: String
     let title: String
