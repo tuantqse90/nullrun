@@ -345,7 +345,11 @@ struct CatchCamView: View {
 
     private func catchSuccess(species: Critter) async {
         let image = (try? await camera.capture()) ?? UIImage()
-        let entry = CritterStore.add(image, species: species)
+        // JPEG-encode + disk writes off the main actor so the catch celebration
+        // doesn't hitch (full-res photos are heavy to encode).
+        let entry = await Task.detached(priority: .userInitiated) {
+            CritterStore.add(image, species: species)
+        }.value
         caughtImage = image
         Haptics.success()
         withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
@@ -588,16 +592,14 @@ struct CritterDexView: View {
                     } else {
                         LazyVGrid(columns: cols, spacing: 14) {
                             ForEach(Array(collection.critters.enumerated()), id: \.element.id) { i, c in
-                                GeometryReader { geo in
-                                    CritterCard(critter: c, image: CritterStore.image(c), width: geo.size.width, animateHolo: false)
-                                }
-                                .aspectRatio(1 / 1.42, contentMode: .fit)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    Haptics.light()
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { selected = c }
-                                }
-                                .riseIn(min(i, 6))
+                                CritterThumb(critter: c)
+                                    .aspectRatio(1 / 1.42, contentMode: .fit)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        Haptics.light()
+                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { selected = c }
+                                    }
+                                    .riseIn(min(i, 6))
                             }
                         }
                         .padding(.horizontal, 20)

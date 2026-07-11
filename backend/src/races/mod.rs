@@ -231,7 +231,11 @@ pub async fn on_activity(state: &AppState, user_id: Uuid, session_id: Uuid) {
                 continue;
             }
             // Count only post-join distance so a runner's pre-guild km can't
-            // gift XP, and leave-A/join-B can't re-mint the same milestones.
+            // gift XP: each guild earns only from distance run while this user
+            // was its member. (The source_id is not guild-scoped, so switching
+            // guilds and genuinely re-running a milestone can mint to the new
+            // guild — that's real, membership-era distance, and only ever pays
+            // cosmetic guild XP; the economy firewall is untouched either way.)
             let mine = window_distance(state, user_id, start, end, Some(joined_at)).await?;
             let defs = milestones(state).await?;
             let mut minted = 0i64;

@@ -237,6 +237,26 @@ struct CritterCard: View {
     }
 }
 
+/// Dex-grid cell: renders a CritterCard sized to its slot, loading a
+/// downsampled thumbnail off the main thread (full-res decode per cell janks
+/// the scroll). Shows the card's built-in gradient placeholder until ready.
+struct CritterThumb: View {
+    let critter: CaughtCritter
+    @State private var image: UIImage?
+
+    var body: some View {
+        GeometryReader { geo in
+            CritterCard(critter: critter, image: image, width: geo.size.width, animateHolo: false)
+        }
+        .task(id: critter.id) {
+            guard image == nil else { return }
+            let c = critter
+            let img = await Task.detached(priority: .utility) { CritterStore.thumbnail(c) }.value
+            if !Task.isCancelled { image = img }
+        }
+    }
+}
+
 /// A big, interactive card: drag to tilt it in 3D and the holo highlight
 /// tracks your finger. Used for the catch reveal and the dex detail view.
 struct HolographicCard: View {

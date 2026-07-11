@@ -108,9 +108,6 @@ async fn ingest(
 
     for event in &body.events {
         let user_id = resolve_user(&state, &event.user_ref).await?;
-        if user_id.is_none() {
-            unmatched += 1;
-        }
         let inserted: Option<(Uuid,)> = sqlx::query_as(
             "INSERT INTO partner_events
                  (partner, external_id, user_ref, user_id, event_type, amount_vnd,
@@ -136,7 +133,12 @@ async fn ingest(
             continue;
         };
         accepted += 1;
-        let Some(user_id) = user_id else { continue };
+        // Count as unmatched only once we know this is a *new* event (a
+        // duplicate re-send must not inflate the unmatched stat).
+        let Some(user_id) = user_id else {
+            unmatched += 1;
+            continue;
+        };
 
         // Anti-abuse: events are stored for audit but only MINT if their
         // timestamp is sane — no future dates (would seed every later
@@ -180,11 +182,13 @@ async fn ingest(
                 .execute(&mut *tx)
                 .await?;
                 if minted.rows_affected() > 0 {
-                    sqlx::query("UPDATE users SET points_balance = points_balance + $2 WHERE id = $1")
-                        .bind(user_id)
-                        .bind(rule.points)
-                        .execute(&mut *tx)
-                        .await?;
+                    sqlx::query(
+                        "UPDATE users SET points_balance = points_balance + $2 WHERE id = $1",
+                    )
+                    .bind(user_id)
+                    .bind(rule.points)
+                    .execute(&mut *tx)
+                    .await?;
                     points_minted += rule.points;
                 }
                 tx.commit().await?;
@@ -194,7 +198,9 @@ async fn ingest(
         // Defer mission settlement to once-per-user after the batch — a
         // 500-event batch from one driver must not run the 6-mission sweep
         // 500 times (that was thousands of serial round-trips per request).
-        touched.entry(user_id).or_insert_with(|| event.user_ref.clone());
+        touched
+            .entry(user_id)
+            .or_insert_with(|| event.user_ref.clone());
     }
 
     for (user_id, user_ref) in &touched {
@@ -273,7 +279,10 @@ fn period_bounds(cadence: &str) -> (DateTime<Utc>, String) {
         "weekly" => (rules::vn_week_start_utc(), rules::current_week()),
         "monthly" => {
             let d = rules::vn_today();
-            (vn_month_start_utc(), format!("{}-{:02}", d.year(), d.month()))
+            (
+                vn_month_start_utc(),
+                format!("{}-{:02}", d.year(), d.month()),
+            )
         }
         _ => (rules::vn_day_start_utc(), rules::vn_today().to_string()),
     }
@@ -401,7 +410,11 @@ async fn settle_missions(
                 .bind(mission.reward_points)
                 .execute(&mut *tx)
                 .await?;
-            completed.push((mission.key.clone(), mission.title.clone(), mission.reward_points));
+            completed.push((
+                mission.key.clone(),
+                mission.title.clone(),
+                mission.reward_points,
+            ));
         }
         tx.commit().await?;
     }
@@ -501,7 +514,15 @@ async fn engage_stats(
     .fetch_all(&state.db)
     .await?;
     for r in &mut recent {
-        let tail: String = r.user_ref.chars().rev().take(3).collect::<String>().chars().rev().collect();
+        let tail: String = r
+            .user_ref
+            .chars()
+            .rev()
+            .take(3)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         r.user_ref = format!("•••{tail}");
     }
 
@@ -627,12 +648,11 @@ async fn driver_profile(state: &AppState, user_id: Uuid) -> Result<Value, AppErr
     .bind(since)
     .fetch_one(&state.db)
     .await?;
-    let last_event: Option<DateTime<Utc>> = sqlx::query_scalar(
-        "SELECT MAX(occurred_at) FROM partner_events WHERE user_id = $1",
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
+    let last_event: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT MAX(occurred_at) FROM partner_events WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&state.db)
+            .await?;
     let days_inactive = last_event
         .map(|t| (Utc::now() - t).num_days().max(0))
         .unwrap_or(999);
@@ -717,21 +737,28 @@ async fn ai_personalize(
     if let Some(config) = ai::AiConfig::from_env() {
         let menu: Vec<Value> = all
             .iter()
-            .map(|m| json!({"key": m.key, "title": m.title, "metric": m.metric,
-                            "base_target": m.target, "cadence": m.cadence}))
+            .map(|m| {
+                json!({"key": m.key, "title": m.title, "metric": m.metric,
+                            "base_target": m.target, "cadence": m.cadence})
+            })
             .collect();
         let system = "Bạn là hệ thống cá nhân hoá nhiệm vụ của VETC. Chọn tối đa 3 nhiệm vụ \
             từ danh sách cho tài xế này và hiệu chỉnh chỉ tiêu (target) phù hợp mức độ hoạt \
             động — thấp thì dễ hơn để tạo đà, cao thì thách thức hơn. target trong khoảng \
             0.5x đến 2x base_target. KHÔNG khuyến khích lái nhanh/nhiều bất chấp. \
             Trả về JSON: {\"picks\": [{\"key\": \"...\", \"target\": số}], \"rationale\": \"1 câu tiếng Việt\"}";
-        let user_msg = format!("Hồ sơ 30 ngày: {profile}\nDanh sách nhiệm vụ: {}", json!(menu));
+        let user_msg = format!(
+            "Hồ sơ 30 ngày: {profile}\nDanh sách nhiệm vụ: {}",
+            json!(menu)
+        );
         match ai::chat(&config, system, &user_msg, true).await {
             Ok(raw) => {
                 if let Some(parsed) = ai::parse_json(&raw) {
                     if let Some(arr) = parsed["picks"].as_array() {
                         for p in arr.iter().take(3) {
-                            if let (Some(key), Some(target)) = (p["key"].as_str(), p["target"].as_f64()) {
+                            if let (Some(key), Some(target)) =
+                                (p["key"].as_str(), p["target"].as_f64())
+                            {
                                 picks.push((key.to_string(), target));
                             }
                         }
@@ -760,8 +787,13 @@ async fn ai_personalize(
     // Clamp to the whitelist and persist overrides for the current period.
     let mut applied = Vec::new();
     for (key, wanted) in picks {
-        let Some(mission) = all.iter().find(|m| m.key == key) else { continue };
-        let target = wanted.clamp(mission.target * 0.5, mission.target * 2.0).round().max(1.0);
+        let Some(mission) = all.iter().find(|m| m.key == key) else {
+            continue;
+        };
+        let target = wanted
+            .clamp(mission.target * 0.5, mission.target * 2.0)
+            .round()
+            .max(1.0);
         let (_, period_key) = period_bounds(&mission.cadence);
         sqlx::query(
             "INSERT INTO user_mission_overrides (user_id, mission_key, period_key, target)
@@ -815,9 +847,8 @@ async fn ai_winback(
         let system = "Bạn viết tin nhắn win-back ngắn (<=160 ký tự, tiếng Việt, giọng ấm áp, \
             không gây áp lực) cho tài xế VETC lâu không hoạt động. Nhắc nhẹ phần thưởng đang \
             chờ. Trả về JSON: {\"message\": \"...\"}";
-        let user_msg = format!(
-            "Tài xế im ắng {days} ngày. Hồ sơ: {profile}. Nhiệm vụ gợi ý: {suggested}"
-        );
+        let user_msg =
+            format!("Tài xế im ắng {days} ngày. Hồ sơ: {profile}. Nhiệm vụ gợi ý: {suggested}");
         match ai::chat(&config, system, &user_msg, true).await {
             Ok(raw) => {
                 if let Some(parsed) = ai::parse_json(&raw) {

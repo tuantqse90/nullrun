@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -103,6 +104,30 @@ enum CritterStore {
 
     static func image(_ c: CaughtCritter) -> UIImage? {
         UIImage(contentsOfFile: dir.appendingPathComponent(c.photoFile).path)
+    }
+
+    private static let thumbCache = NSCache<NSString, UIImage>()
+
+    /// Downsampled, fully-decoded thumbnail for the dex grid. Full-res catch
+    /// photos are multi-MB; loading/decoding them per cell on the main thread
+    /// (inside a re-running GeometryReader) janks the scroll. This decodes a
+    /// small bitmap via ImageIO — safe to call off the main actor — and caches
+    /// it by filename. Call from a background task.
+    static func thumbnail(_ c: CaughtCritter, maxPixel: CGFloat = 640) -> UIImage? {
+        let key = c.photoFile as NSString
+        if let hit = thumbCache.object(forKey: key) { return hit }
+        let url = dir.appendingPathComponent(c.photoFile)
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        let img = UIImage(cgImage: cg)
+        thumbCache.setObject(img, forKey: key)
+        return img
     }
 
     private static func excludeFromBackup() {

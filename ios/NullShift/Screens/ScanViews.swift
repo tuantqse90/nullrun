@@ -524,6 +524,12 @@ struct ScanResView: View {
         return f.string(from: Date())
     }
 
+    /// One-decimal cm, VN comma, trailing ",0" trimmed — matches the edit field.
+    private static func cm(_ v: Double) -> String {
+        let s = String(format: "%.1f", v).replacingOccurrences(of: ".", with: ",")
+        return (s.hasSuffix(",0") ? String(s.dropLast(2)) : s) + " cm"
+    }
+
     @ViewBuilder
     private func metricCard(_ metric: BodyMetric) -> some View {
         let latest = store.latest(metric)
@@ -544,13 +550,15 @@ struct ScanResView: View {
                     }
                     Image(systemName: "square.and.pencil").font(.system(size: 14)).foregroundStyle(Color(hex: 0xC6BEB0))
                 }
-                Text(latest.map { Fmt.dist($0.value / 100 * 100).replacingOccurrences(of: ",00", with: "") + " cm" }
-                     ?? "— chạm để nhập")
+                Text(latest.map { Self.cm($0.value) } ?? "— chạm để nhập")
                     .font(.mono(25))
                     .foregroundStyle(latest == nil ? Theme.faint : Theme.ink)
                 if let delta = store.delta(metric) {
+                    // Body surfaces carry NO thin/fat judgement (guardrail #4):
+                    // the signed number states the change; the colour stays
+                    // neutral so shrinking is never framed as "winning".
                     Text(String(format: "thay đổi %+.1f cm · so lần trước", delta).replacingOccurrences(of: ".", with: ","))
-                        .font(.viet(12.5)).foregroundStyle(delta <= 0 ? Theme.green : Theme.muted)
+                        .font(.viet(12.5)).foregroundStyle(Theme.muted)
                 }
             }
             .padding(EdgeInsets(top: 13, leading: 16, bottom: 13, trailing: 16))
