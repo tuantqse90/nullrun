@@ -122,6 +122,11 @@ enum BodyHologram {
         figure.addChildNode(part(legProfile, aspect: 0.85, x: legSpread))
         figure.addChildNode(part(armProfile, aspect: 1.0, x: -0.126))
         figure.addChildNode(part(armProfile, aspect: 1.0, x: 0.126))
+        // A minimal, friendly face so the model reads as a little character
+        // (like the Nhím companion) instead of a blank silhouette. Eyes only:
+        // neutral, no mouth or gender cues — the body stays a stylised
+        // measurement model (guardrail #4/#7 intact).
+        figure.addChildNode(faceEyes())
 
         if animated {
             figure.runAction(.repeatForever(.rotateBy(x: 0, y: 2 * .pi, z: 0, duration: 14)))
@@ -226,7 +231,9 @@ enum BodyHologram {
         rimGreen.light = SCNLight()
         rimGreen.light?.type = .omni
         rimGreen.light?.color = UIColor(red: 0.20, green: 0.70, blue: 0.49, alpha: 1)
-        rimGreen.light?.intensity = 900
+        // Tuned down: the body is now a LIT (blinn) surface, not a `.constant`
+        // one that ignored these — 900 would blow it out.
+        rimGreen.light?.intensity = 360
         rimGreen.light?.categoryBitMask = 1 // hologram only
         rimGreen.position = SCNVector3(0.9, 0.1, 0.6)
         scene.rootNode.addChildNode(rimGreen)
@@ -235,7 +242,7 @@ enum BodyHologram {
         rimPurple.light = SCNLight()
         rimPurple.light?.type = .omni
         rimPurple.light?.color = UIColor(red: 0.54, green: 0.39, blue: 0.82, alpha: 1)
-        rimPurple.light?.intensity = 750
+        rimPurple.light?.intensity = 300
         rimPurple.light?.categoryBitMask = 1 // hologram only
         rimPurple.position = SCNVector3(-0.9, 0.4, -0.4)
         scene.rootNode.addChildNode(rimPurple)
@@ -243,7 +250,8 @@ enum BodyHologram {
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.intensity = 90
+        // A touch brighter so the toon body's shadow side stays cute, not murky.
+        ambient.light?.intensity = 210
         ambient.light?.categoryBitMask = 3
         scene.rootNode.addChildNode(ambient)
 
@@ -498,17 +506,6 @@ enum BodyHologram {
     ) -> SCNNode {
         let node = SCNNode(geometry: loft(profile, aspect: aspect, waistScale: waistScale, hipScale: hipScale))
         node.geometry?.firstMaterial = solidMaterial()
-        // A COARSE wire twin — distinct glowing grid lines, not the dense 64×36
-        // mesh (which merged into a solid cyan wash + bloom that clipped the
-        // whole body to white). Sparse lines read as a proper sci-fi wireframe
-        // and let the teal→violet gradient show through.
-        let wire = SCNNode(geometry: loft(
-            profile, aspect: aspect, waistScale: waistScale, hipScale: hipScale,
-            slices: 22, segments: 14
-        ))
-        wire.scale = SCNVector3(1.02, 1.004, 1.02)
-        wire.geometry?.firstMaterial = wireMaterial()
-        node.addChildNode(wire)
         node.position.x = x
         return node
     }
@@ -541,35 +538,60 @@ enum BodyHologram {
         }
     }()
 
-    private static func solidMaterial() -> SCNMaterial {
-        // Translucent glowing hologram skin, teal→violet gradient.
-        // IMPORTANT: under `.constant` lighting SceneKit lights the surface from
-        // AMBIENT, not the diffuse texture — a `diffuse.contents = image` renders
-        // flat white (proven: torso sampled pure 255,255,255). So the gradient is
-        // driven through `emission`, which IS shown under constant (same as the
-        // wire's cyan). Alpha-blended + front-faces-only + depth write keeps it a
-        // single coherent glassy body instead of additive-summing to white.
-        let m = SCNMaterial()
-        m.lightingModel = .constant
-        m.diffuse.contents = UIColor.black
-        m.emission.contents = holoGradient
-        m.emission.intensity = 0.9
-        m.transparency = 0.62
-        m.isDoubleSided = false
-        m.writesToDepthBuffer = true
-        return m
+    /// Two cute anime bead-eyes on the head front (spins with the figure).
+    private static func faceEyes() -> SCNNode {
+        let root = SCNNode()
+        let ink = UIColor(red: 0x24 / 255.0, green: 0x1B / 255.0, blue: 0x3A / 255.0, alpha: 1)
+        func flat(_ c: UIColor, glow: CGFloat = 0) -> SCNMaterial {
+            let m = SCNMaterial()
+            m.lightingModel = .constant
+            m.diffuse.contents = c
+            if glow > 0 {
+                m.emission.contents = c
+                m.emission.intensity = glow
+            }
+            return m
+        }
+        for side in [-1.0, 1.0] {
+            // white base (oval, hugged to the head) + dark pupil + tiny glint
+            let white = SCNNode(geometry: SCNSphere(radius: 0.019))
+            white.geometry?.firstMaterial = flat(.white, glow: 0.25)
+            white.position = SCNVector3(Float(side) * 0.030, 0.402, 0.056)
+            white.scale = SCNVector3(0.85, 1.2, 0.55)
+            root.addChildNode(white)
+
+            let pupil = SCNNode(geometry: SCNSphere(radius: 0.0115))
+            pupil.geometry?.firstMaterial = flat(ink)
+            pupil.position = SCNVector3(Float(side) * 0.030, 0.400, 0.070)
+            pupil.scale = SCNVector3(1, 1.15, 1)
+            root.addChildNode(pupil)
+
+            let glint = SCNNode(geometry: SCNSphere(radius: 0.004))
+            glint.geometry?.firstMaterial = flat(.white, glow: 0.6)
+            glint.position = SCNVector3(Float(side) * 0.030 + 0.004, 0.406, 0.079)
+            root.addChildNode(glint)
+        }
+        return root
     }
 
-    private static func wireMaterial() -> SCNMaterial {
-        // Bright neon rim wireframe over the skin.
+    private static func solidMaterial() -> SCNMaterial {
+        // Solid cel-shaded "anime" body — the same treatment as the hedgehog
+        // pet (lambert-ish + a soft gradient skin), lit by the key light for
+        // form and the green/purple rim lights for that glowing edge. Opaque
+        // and cute, not a ghostly wireframe. A gentle self-emission keeps the
+        // shadows from going dark so it stays a bright toon character. Still a
+        // stylised silhouette (no face, no photoreal mesh) — privacy (#7) and
+        // no-body-judgement (#4) hold.
         let m = SCNMaterial()
-        m.fillMode = .lines
-        m.lightingModel = .constant
-        m.emission.contents = UIColor(red: 0.40, green: 0.92, blue: 0.90, alpha: 1)
-        m.transparency = 0.5
-        m.blendMode = .add
-        m.isDoubleSided = true
-        m.writesToDepthBuffer = false
+        m.lightingModel = .blinn
+        m.diffuse.contents = holoGradient // teal→violet skin, UV-mapped
+        m.emission.contents = holoGradient
+        m.emission.intensity = 0.30
+        m.specular.contents = UIColor(white: 0.55, alpha: 1)
+        m.shininess = 0.32
+        m.transparency = 1.0
+        m.isDoubleSided = false
+        m.writesToDepthBuffer = true
         return m
     }
 
