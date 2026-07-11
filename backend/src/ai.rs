@@ -59,13 +59,17 @@ pub async fn chat_messages(
     config: &AiConfig,
     messages: &[Value],
     max_tokens: u32,
+    json_mode: bool,
 ) -> Result<String, AppError> {
-    let body = json!({
+    let mut body = json!({
         "model": config.model,
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": max_tokens,
     });
+    if json_mode {
+        body["response_format"] = json!({"type": "json_object"});
+    }
     complete(config, body).await
 }
 

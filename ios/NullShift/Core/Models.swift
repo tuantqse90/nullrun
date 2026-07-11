@@ -47,10 +47,14 @@ struct CoachInsight: Codable {
     let body: String
 }
 
-/// One reply from the in-app health coach chat.
+/// One reply from the in-app health coach chat. `chips` are AI-suggested
+/// follow-up questions (tap to ask); `action` is a whitelisted in-app button
+/// key ("start_run" | "set_goal" | "none") the client maps to a screen.
 struct CoachChatReply: Codable {
     let ai: Bool
     let reply: String
+    let chips: [String]?
+    let action: String?
 }
 
 struct GameStatus: Codable, Identifiable {

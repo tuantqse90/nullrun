@@ -42,7 +42,16 @@ struct HomeView: View {
         .task { await app.refresh() }
         .sheet(isPresented: $showCoach) {
             HealthChatView()
+                .environmentObject(app)
                 .presentationDragIndicator(.visible)
+        }
+        .onChange(of: app.requestGoalEdit) {
+            // Coach chat asked to edit the weekly goal — open the editor.
+            if app.requestGoalEdit {
+                goalInput = String(Int(app.points?.weeklyGoalKm ?? 25))
+                goalPrompt = true
+                app.requestGoalEdit = false
+            }
         }
         .onAppear {
             #if DEBUG

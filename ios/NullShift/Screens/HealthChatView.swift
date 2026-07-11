@@ -7,11 +7,14 @@ import SwiftUI
 // Nothing here mints points (economy firewall) — it's guidance, not currency.
 struct HealthChatView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var app: AppModel
 
     private struct Bubble: Identifiable {
         let id = UUID()
         let role: String // "user" | "assistant"
         let text: String
+        var chips: [String] = []     // AI-suggested follow-up questions
+        var action: String? = nil    // whitelisted in-app action key
     }
 
     @State private var bubbles: [Bubble] = []
@@ -38,6 +41,13 @@ struct HealthChatView: View {
             inputBar
         }
         .background(Theme.bg)
+        .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["DEV_COACH_SEED"] != nil, bubbles.isEmpty {
+                send("Tuần này nên chạy thế nào?")
+            }
+            #endif
+        }
     }
 
     // MARK: header
@@ -70,7 +80,18 @@ struct HealthChatView: View {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     coachBubble(intro)
                     ForEach(bubbles) { b in
-                        if b.role == "user" { userBubble(b.text) } else { coachBubble(b.text) }
+                        if b.role == "user" {
+                            userBubble(b.text)
+                        } else {
+                            // Show the interactive chips/action only on the
+                            // latest coach message (quick replies for now).
+                            let isLast = b.id == bubbles.last?.id
+                            coachBubble(
+                                b.text,
+                                chips: isLast ? b.chips : [],
+                                action: isLast ? b.action : nil
+                            )
+                        }
                     }
                     if sending { typing }
                     Color.clear.frame(height: 1).id("bottom")
@@ -82,22 +103,81 @@ struct HealthChatView: View {
         }
     }
 
-    private func coachBubble(_ text: String) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            ZStack {
-                Circle().fill(Theme.purpleBg)
-                Mascot(mood: .happy, bobbing: false).frame(width: 20, height: 17)
+    private func coachBubble(_ text: String, chips: [String] = [], action: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 8) {
+                ZStack {
+                    Circle().fill(Theme.purpleBg)
+                    Mascot(mood: .happy, bobbing: false).frame(width: 20, height: 17)
+                }
+                .frame(width: 28, height: 28)
+                Text(text)
+                    .font(.viet(14)).foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(EdgeInsets(top: 10, leading: 13, bottom: 10, trailing: 13))
+                    .background(Theme.sheetBg)
+                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.hairline, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Spacer(minLength: 34)
             }
-            .frame(width: 28, height: 28)
-            Text(text)
-                .font(.viet(14)).foregroundStyle(Theme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(EdgeInsets(top: 10, leading: 13, bottom: 10, trailing: 13))
-                .background(Theme.sheetBg)
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.hairline, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            Spacer(minLength: 34)
+            // Interactive action button (whitelisted → maps to a screen).
+            if let action, let meta = Self.actionMeta(action) {
+                Button {
+                    Haptics.heavy()
+                    perform(action)
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: meta.icon).font(.system(size: 13, weight: .bold))
+                        Text(meta.label).font(.viet(13.5, .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 15).padding(.vertical, 10)
+                    .background(Theme.green).clipShape(Capsule())
+                    .shadow(color: Theme.green.opacity(0.3), radius: 7, y: 3)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 36)
+            }
+            // AI-suggested follow-up questions — tap to ask.
+            if !chips.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(chips, id: \.self) { chip in
+                        Button {
+                            Haptics.light()
+                            send(chip)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(chip).font(.viet(12.5, .medium)).foregroundStyle(Theme.purpleDeep)
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.purple)
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(Theme.purpleBg).clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.leading, 36)
+            }
         }
+    }
+
+    /// Whitelisted in-app actions the coach may surface as a button.
+    private static func actionMeta(_ key: String) -> (label: String, icon: String)? {
+        switch key {
+        case "start_run": return ("Bắt đầu chạy", "figure.run")
+        case "set_goal": return ("Đặt mục tiêu tuần", "target")
+        default: return nil
+        }
+    }
+
+    private func perform(_ key: String) {
+        switch key {
+        case "start_run": app.screen = .prerun
+        case "set_goal": app.requestGoalEdit = true
+        default: break
+        }
+        dismiss()
     }
 
     private func userBubble(_ text: String) -> some View {
@@ -197,7 +277,11 @@ struct HealthChatView: View {
         Task {
             do {
                 let reply = try await APIClient.shared.coachChat(turns)
-                bubbles.append(Bubble(role: "assistant", text: reply.reply))
+                let act = reply.action == "none" ? nil : reply.action
+                bubbles.append(Bubble(
+                    role: "assistant", text: reply.reply,
+                    chips: reply.chips ?? [], action: act
+                ))
             } catch {
                 bubbles.append(Bubble(
                     role: "assistant",

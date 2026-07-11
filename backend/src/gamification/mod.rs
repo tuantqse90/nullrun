@@ -524,6 +524,17 @@ const COACH_SYSTEM: &str = "Bạn là \"Nhím Coach\" — huấn luyện viên s
     PHONG CÁCH: tiếng Việt, ấm áp, ngắn gọn, thực tế, dễ làm theo; có thể dùng emoji và gạch đầu \
     dòng; trả lời tối đa khoảng 160 từ.";
 
+/// Structured-output contract appended to the coach system prompt. The reply
+/// text still follows every safety rule above; `chips`/`action` drive the
+/// in-chat interactive buttons (action is picked from a whitelist server-side).
+const COACH_JSON_FORMAT: &str = "Luôn trả lời DƯỚI DẠNG JSON THUẦN, không thêm chữ nào ngoài JSON: \
+    {\"reply\":\"...\",\"chips\":[\"...\"],\"action\":\"...\"}. \
+    \"reply\": câu trả lời tiếng Việt cho người dùng (tuân thủ mọi quy tắc an toàn ở trên). \
+    \"chips\": tối đa 3 GỢI Ý câu hỏi tiếp theo NGẮN người dùng có thể bấm để hỏi tiếp — mỗi cái tối \
+    đa 6 từ, ví dụ \"Bài khởi động?\", \"Món sau khi chạy?\". \
+    \"action\": một trong \"none\" | \"start_run\" | \"set_goal\". Chọn \"start_run\" khi nên khuyến \
+    khích họ bắt đầu buổi chạy ngay; \"set_goal\" khi nên gợi ý chỉnh mục tiêu tuần; còn lại \"none\".";
+
 /// In-app health coach chat (tap the mascot). Multi-turn, client-held history;
 /// the server injects the guardrail system prompt + the user's REAL stats as
 /// context. AI via the locked DeepSeek client; template fallback when no key.
@@ -563,30 +574,76 @@ async fn coach_chat(
     if let Some(config) = ai::AiConfig::from_env() {
         let mut msgs = vec![
             json!({"role": "system", "content": COACH_SYSTEM}),
+            json!({"role": "system", "content": COACH_JSON_FORMAT}),
             json!({"role": "system", "content":
                 format!("Số liệu thật của người dùng (dùng để cá nhân hoá, đừng bịa thêm): {}", c.stats)}),
         ];
         for m in &body.messages {
             msgs.push(json!({"role": m.role, "content": m.content}));
         }
-        match ai::chat_messages(&config, &msgs, 700).await {
-            Ok(reply) if !reply.is_empty() => {
-                return Ok(Json(json!({ "ai": true, "reply": reply })));
+        match ai::chat_messages(&config, &msgs, 700, true).await {
+            Ok(raw) => {
+                if let Some(p) = ai::parse_json(&raw) {
+                    let reply = p["reply"].as_str().unwrap_or("").trim().to_string();
+                    if !reply.is_empty() {
+                        return Ok(Json(json!({
+                            "ai": true,
+                            "reply": reply,
+                            "chips": clean_chips(&p["chips"]),
+                            "action": whitelist_action(p["action"].as_str()),
+                        })));
+                    }
+                }
+                // Model ignored the JSON contract — still show its text, no widgets.
+                if !raw.is_empty() {
+                    return Ok(Json(
+                        json!({ "ai": true, "reply": raw, "chips": [], "action": "none" }),
+                    ));
+                }
             }
-            Ok(_) => {}
             Err(e) => tracing::error!(error = %e, "coach chat ai failed, falling back"),
         }
     }
 
+    let (reply, chips, action) = coach_fallback(&body.messages, &c);
     Ok(Json(json!({
         "ai": false,
-        "reply": coach_fallback(&body.messages, &c),
+        "reply": reply,
+        "chips": chips,
+        "action": action,
     })))
 }
 
+/// Only ONE of these in-app actions may be surfaced as a button — the model
+/// picks a key, the client owns the label + behaviour. Prevents the AI from
+/// injecting arbitrary buttons.
+fn whitelist_action(key: Option<&str>) -> &'static str {
+    match key {
+        Some("start_run") => "start_run",
+        Some("set_goal") => "set_goal",
+        _ => "none",
+    }
+}
+
+/// Sanitise AI-suggested follow-up chips: strings only, trimmed, ≤60 chars,
+/// non-empty, at most 3.
+fn clean_chips(v: &Value) -> Vec<String> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty() && s.chars().count() <= 60)
+                .take(3)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Template fallback when no AI key — keyword-routed, still safe & useful so
-/// the demo works offline. Never gives extreme/medical advice.
-fn coach_fallback(messages: &[ChatMsg], c: &CoachCtx) -> String {
+/// the demo works offline. Never gives extreme/medical advice. Returns
+/// (reply, follow-up chips, action) to match the AI path.
+fn coach_fallback(messages: &[ChatMsg], c: &CoachCtx) -> (String, Vec<String>, &'static str) {
     let last = messages
         .last()
         .map(|m| m.content.to_lowercase())
@@ -595,20 +652,36 @@ fn coach_fallback(messages: &[ChatMsg], c: &CoachCtx) -> String {
         .iter()
         .any(|k| last.contains(k));
     if food {
-        "Gợi ý ăn uống cân bằng cho ngày vận động 🍚:\n\
-         • Trước khi chạy ~1h: chuối hoặc bánh mì + chút mật ong để có năng lượng.\n\
-         • Sau khi chạy: đạm + tinh bột — ức gà/cá, cơm/khoai, rau xanh.\n\
-         • Uống đủ nước cả ngày.\n\
-         Ăn đủ chất và đều đặn quan trọng hơn ăn kiêng nhé. Đây là gợi ý chung, không thay tư vấn y tế."
-            .into()
+        (
+            "Gợi ý ăn uống cân bằng cho ngày vận động 🍚:\n\
+             • Trước khi chạy ~1h: chuối hoặc bánh mì + chút mật ong để có năng lượng.\n\
+             • Sau khi chạy: đạm + tinh bột — ức gà/cá, cơm/khoai, rau xanh.\n\
+             • Uống đủ nước cả ngày.\n\
+             Ăn đủ chất và đều đặn quan trọng hơn ăn kiêng nhé. Đây là gợi ý chung, không thay tư vấn y tế."
+                .into(),
+            vec![
+                "Món sau khi chạy?".into(),
+                "Uống gì khi chạy?".into(),
+                "Ăn vặt lành mạnh?".into(),
+            ],
+            "none",
+        )
     } else {
-        format!(
-            "Gợi ý chạy bộ cho bạn 🏃:\n\
-             • Tuần này bạn đã đi {:.1} km, mục tiêu {:.0} km — chia nhỏ 3–4 buổi cho nhẹ nhàng.\n\
-             • Khởi động 5 phút, chạy theo nhịp nói chuyện được, hạ nhiệt + giãn cơ cuối buổi.\n\
-             • Nghe cơ thể, nghỉ khi mệt. Đều đặn thắng cường độ.\n\
-             (Coach AI đang tạm nghỉ nên đây là gợi ý mẫu.)",
-            c.weekly_km, c.goal
+        (
+            format!(
+                "Gợi ý chạy bộ cho bạn 🏃:\n\
+                 • Tuần này bạn đã đi {:.1} km, mục tiêu {:.0} km — chia nhỏ 3–4 buổi cho nhẹ nhàng.\n\
+                 • Khởi động 5 phút, chạy theo nhịp nói chuyện được, hạ nhiệt + giãn cơ cuối buổi.\n\
+                 • Nghe cơ thể, nghỉ khi mệt. Đều đặn thắng cường độ.\n\
+                 (Coach AI đang tạm nghỉ nên đây là gợi ý mẫu.)",
+                c.weekly_km, c.goal
+            ),
+            vec![
+                "Bài khởi động?".into(),
+                "Chạy bao lâu là đủ?".into(),
+                "Ăn gì trước khi chạy?".into(),
+            ],
+            "start_run",
         )
     }
 }

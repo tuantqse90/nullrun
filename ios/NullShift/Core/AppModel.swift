@@ -49,6 +49,8 @@ final class AppModel: ObservableObject {
     @Published var screen: Screen = .home
     @Published var points: MePoints?
     @Published var coach: CoachInsight?
+    /// Set by the coach chat's "set goal" action; HomeView opens the editor.
+    @Published var requestGoalEdit = false
     @Published var quests: [QuestStatus] = []
     @Published var wheel: WheelState?
     @Published var catalog: [Reward] = []
