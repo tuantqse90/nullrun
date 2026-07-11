@@ -50,6 +50,7 @@ struct Redemption {
     id: Uuid,
     reward_id: Uuid,
     title: String,
+    partner: String,
     cost_points: i64,
     status: String,
     voucher_code: Option<String>,
@@ -58,7 +59,7 @@ struct Redemption {
     expires_at: DateTime<Utc>,
 }
 
-const REDEMPTION_COLS: &str = "r.id, r.reward_id, w.title, r.cost_points, r.status, \
+const REDEMPTION_COLS: &str = "r.id, r.reward_id, w.title, w.partner, r.cost_points, r.status, \
                                r.voucher_code, r.partner_ref, r.created_at, r.expires_at";
 
 #[derive(Deserialize)]
@@ -323,6 +324,7 @@ struct ReconParams {
 #[derive(Serialize, sqlx::FromRow)]
 struct ReconRow {
     day: NaiveDate,
+    partner: String,
     status: String,
     redemptions: i64,
     points: i64,
@@ -344,12 +346,15 @@ async fn reconciliation(
     }
 
     let days = params.days.unwrap_or(7).clamp(1, 90);
+    // Broken out by partner — the catalog is multi-partner now (Guardian +
+    // Tasco/VETC ecosystem), so a single total would misattribute volume.
     let rows: Vec<ReconRow> = sqlx::query_as(
-        "SELECT created_at::date AS day, status, count(*)::bigint AS redemptions,
-                COALESCE(SUM(cost_points), 0)::bigint AS points
-         FROM redemptions
-         WHERE created_at >= now() - make_interval(days => $1)
-         GROUP BY 1, 2 ORDER BY 1 DESC, 2",
+        "SELECT r.created_at::date AS day, w.partner AS partner, r.status,
+                count(*)::bigint AS redemptions,
+                COALESCE(SUM(r.cost_points), 0)::bigint AS points
+         FROM redemptions r JOIN rewards w ON w.id = r.reward_id
+         WHERE r.created_at >= now() - make_interval(days => $1)
+         GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3",
     )
     .bind(days)
     .fetch_all(&state.db)

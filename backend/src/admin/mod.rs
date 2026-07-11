@@ -465,10 +465,14 @@ async fn partner_stats(
 ) -> Result<Json<Value>, AppError> {
     let days = params.days.unwrap_or(14).clamp(1, 90);
 
-    let redemptions: Vec<(NaiveDate, String, i64, i64)> = sqlx::query_as(
-        "SELECT created_at::date, status, count(*)::bigint, COALESCE(SUM(cost_points),0)::bigint
-         FROM redemptions WHERE created_at >= now() - make_interval(days => $1)
-         GROUP BY 1, 2 ORDER BY 1 DESC",
+    // Broken out by partner — the catalog is multi-partner (Guardian + the
+    // Tasco/VETC ecosystem), so a single total would misattribute volume.
+    let redemptions: Vec<(NaiveDate, String, String, i64, i64)> = sqlx::query_as(
+        "SELECT r.created_at::date, w.partner, r.status, count(*)::bigint,
+                COALESCE(SUM(r.cost_points),0)::bigint
+         FROM redemptions r JOIN rewards w ON w.id = r.reward_id
+         WHERE r.created_at >= now() - make_interval(days => $1)
+         GROUP BY 1, 2, 3 ORDER BY 1 DESC",
     )
     .bind(days)
     .fetch_all(&state.db)
@@ -492,8 +496,8 @@ async fn partner_stats(
 
     Ok(Json(json!({
         "days": days,
-        "redemptions": redemptions.iter().map(|(day, status, count, points)| json!({
-            "day": day, "status": status, "count": count, "points": points,
+        "redemptions": redemptions.iter().map(|(day, partner, status, count, points)| json!({
+            "day": day, "partner": partner, "status": status, "count": count, "points": points,
         })).collect::<Vec<_>>(),
         "active_users": active_users,
         "challenges": challenges.iter().map(|(title, joined, completed)| json!({

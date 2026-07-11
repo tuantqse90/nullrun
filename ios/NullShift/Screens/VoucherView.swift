@@ -27,15 +27,17 @@ struct VoucherView: View {
             Spacer()
 
             VStack(spacing: 0) {
+                let brand = RewardBrand.of(redemption.partner)
                 HStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Theme.guardian)
-                        .frame(width: 22, height: 22)
-                        .overlay { Text("G").font(.system(size: 13, weight: .heavy)).foregroundStyle(.white) }
-                    Text("Guardian").font(.viet(14, .bold)).foregroundStyle(Theme.orangeDeep)
+                    Text(brand.mark)
+                        .font(.viet(11, .heavy)).foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(brand.color)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    Text(brand.name).font(.viet(14, .bold)).foregroundStyle(brand.color)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 8)
-                .background(Theme.orangeBg)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(brand.color.opacity(0.12))
                 .clipShape(Capsule())
 
                 Text(redemption.title).font(.viet(26, .heavy)).padding(.top, 12)

@@ -159,6 +159,7 @@ struct Redemption: Codable, Identifiable {
     let id: UUID
     let rewardId: UUID
     let title: String
+    let partner: String
     let costPoints: Int
     let status: String
     let voucherCode: String?
