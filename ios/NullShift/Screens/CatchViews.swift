@@ -154,6 +154,18 @@ struct CatchCamView: View {
         .task {
             await camera.start()
             treatPosReset()
+            #if DEBUG
+            // Design-QA: seed a catch reveal (no camera on simulator).
+            if let rar = ProcessInfo.processInfo.environment["DEV_CATCH_REVEAL"] {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                    caught = CaughtCritter(
+                        id: UUID(), species: "dog", nickname: "Đốm", caughtAt: Date(),
+                        photoFile: "", rarity: rar.isEmpty ? "legendary" : rar, number: 7
+                    )
+                    celebrate = true
+                }
+            }
+            #endif
         }
         .onDisappear { camera.stop() }
         .onChange(of: camera.detection) { _, new in
@@ -352,6 +364,16 @@ struct CatchCamView: View {
         }.value
         caughtImage = image
         Haptics.success()
+        // A little haptic flourish for rare+ catches — the burst deserves it.
+        let r = entry.rarityValue
+        if r == .epic || r == .legendary {
+            Task { @MainActor in
+                for _ in 0..<(r == .legendary ? 3 : 2) {
+                    try? await Task.sleep(for: .milliseconds(120))
+                    Haptics.heavy()
+                }
+            }
+        }
         withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
             caught = entry
             celebrate = true
@@ -399,6 +421,12 @@ struct CatchCamView: View {
                 center: .center, startRadius: 30, endRadius: 520
             )
             .ignoresSafeArea()
+
+            // The "catch!" burst — rays + shockwave rings + particle explosion,
+            // intensity scaled by rarity. Sits behind the card.
+            CatchBurst(rarity: r)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
 
             VStack(spacing: 16) {
                 VStack(spacing: 3) {
@@ -700,4 +728,111 @@ private func magnitude(_ s: CGSize) -> CGFloat { sqrt(s.width * s.width + s.heig
 
 private extension CGFloat {
     func clamped(_ lo: CGFloat, _ hi: CGFloat) -> CGFloat { Swift.min(hi, Swift.max(lo, self)) }
+}
+
+// MARK: - catch burst
+
+/// The "catch!" explosion behind the reveal card: a rotating sunburst, three
+/// expanding shockwave rings, a radial particle/sparkle burst, and a bright
+/// flash. Intensity scales with rarity (legendary = gold rays + most
+/// particles). Plays once on appear; Reduce Motion → just a soft flash.
+struct CatchBurst: View {
+    let rarity: CritterRarity
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var go = false
+    @State private var spin = false
+
+    private var particleCount: Int {
+        switch rarity {
+        case .legendary: 34
+        case .epic: 26
+        case .rare: 18
+        case .common: 12
+        }
+    }
+    private var rayCount: Int { rarity == .legendary ? 18 : rarity == .epic ? 14 : 10 }
+    private var tint: Color { rarity.frame.first ?? .white }
+    private var tint2: Color { rarity.accent }
+
+    var body: some View {
+        ZStack {
+            if !reduceMotion {
+                sunburst
+                    .rotationEffect(.degrees(spin ? 360 : 0))
+                    .scaleEffect(go ? 1 : 0.2)
+                    .opacity(go ? (rarity == .common ? 0.22 : 0.4) : 0)
+
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .strokeBorder(tint.opacity(0.85), lineWidth: 3)
+                        .frame(width: 130, height: 130)
+                        .scaleEffect(go ? 4.4 : 0.15)
+                        .opacity(go ? 0 : 0.9)
+                        .animation(.easeOut(duration: 1.0).delay(Double(i) * 0.13), value: go)
+                }
+
+                ForEach(0..<particleCount, id: \.self) { i in particle(i) }
+            }
+
+            // Bright central flash (kept even under Reduce Motion, softly).
+            Circle()
+                .fill(RadialGradient(
+                    colors: [.white.opacity(0.95), .clear],
+                    center: .center, startRadius: 0, endRadius: 230
+                ))
+                .frame(width: 480, height: 480)
+                .scaleEffect(go ? 1.35 : 0.3)
+                .opacity(go ? 0 : (reduceMotion ? 0.5 : 0.9))
+                .animation(.easeOut(duration: reduceMotion ? 0.5 : 0.55), value: go)
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.9)) { go = true }
+            if !reduceMotion {
+                withAnimation(.linear(duration: 9).repeatForever(autoreverses: false)) { spin = true }
+            }
+        }
+    }
+
+    private var sunburst: some View {
+        Canvas { ctx, size in
+            let c = CGPoint(x: size.width / 2, y: size.height / 2)
+            let r = min(size.width, size.height) * 0.72
+            for i in 0..<rayCount {
+                let a = Double(i) / Double(rayCount) * 2 * .pi
+                let w = 0.13
+                var path = Path()
+                path.move(to: c)
+                path.addLine(to: CGPoint(x: c.x + cos(a - w) * r, y: c.y + sin(a - w) * r))
+                path.addLine(to: CGPoint(x: c.x + cos(a + w) * r, y: c.y + sin(a + w) * r))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(tint.opacity(0.55)))
+            }
+        }
+        .frame(width: 470, height: 470)
+        .blendMode(.screen)
+    }
+
+    private func particle(_ i: Int) -> some View {
+        let angle = Double(i) / Double(particleCount) * 2 * .pi + Double(i % 3) * 0.28
+        let dist = 120 + CGFloat(i % 5) * 26
+        let dx = CGFloat(cos(angle)) * dist
+        let dy = CGFloat(sin(angle)) * dist
+        let isStar = i % 4 == 0
+        return Group {
+            if isStar {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 12 + CGFloat(i % 3) * 5))
+                    .foregroundStyle(i % 2 == 0 ? tint : .white)
+            } else {
+                Circle()
+                    .fill(i % 2 == 0 ? tint : tint2)
+                    .frame(width: 6 + CGFloat(i % 3) * 3, height: 6 + CGFloat(i % 3) * 3)
+            }
+        }
+        .offset(x: go ? dx : 0, y: go ? dy : 0)
+        .scaleEffect(go ? 0.3 : 1)
+        .opacity(go ? 0 : 1)
+        .animation(.easeOut(duration: 0.9 + Double(i % 4) * 0.12), value: go)
+    }
 }
