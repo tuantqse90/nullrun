@@ -1,5 +1,40 @@
 import SwiftUI
 
+/// Per-partner branding for the rewards catalog. Guardian (health/beauty) is
+/// the anchor; the Tasco/VETC mobility ecosystem plugs into the same engine.
+struct RewardBrand: Hashable {
+    let code: String      // partner code
+    let mark: String      // short badge text on the voucher ticket
+    let name: String      // display name
+    let tagline: String   // section subtitle
+    let color: Color      // brand accent
+
+    static func of(_ partner: String) -> RewardBrand {
+        switch partner {
+        case "vetc":
+            return .init(code: "vetc", mark: "VETC", name: "VETC",
+                         tagline: "Thu phí không dừng", color: Color(hex: 0x0E9E93))
+        case "vetcgo":
+            return .init(code: "vetcgo", mark: "VGO", name: "VETC GO",
+                         tagline: "Di chuyển & thuê xe", color: Color(hex: 0x1E8A5B))
+        case "tasco":
+            return .init(code: "tasco", mark: "TASCO", name: "Tasco",
+                         tagline: "Hệ sinh thái Tasco", color: Color(hex: 0xD2493D))
+        default:
+            return .init(code: "guardian", mark: "G", name: "Guardian",
+                         tagline: "Sức khoẻ & Làm đẹp", color: Color(hex: 0xF26522))
+        }
+    }
+
+    /// Catalog section order — mobility ecosystem first (the track story),
+    /// Guardian anchor last.
+    static let order = ["vetc", "vetcgo", "tasco", "guardian"]
+}
+
+extension Reward {
+    var brand: RewardBrand { RewardBrand.of(partner) }
+}
+
 /// Rewards catalog: dark balance card, ticket-style vouchers, product cards,
 /// redeem bottom sheet, toast — per the prototype.
 struct RewardsView: View {
@@ -15,13 +50,15 @@ struct RewardsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Đổi thưởng").font(.viet(23, .bold)).padding(.bottom, 12)
                     balanceCard
-                    voucherGrid.padding(.top, 14)
-                    productHeader.padding(.top, 16)
-                    productGrid.padding(.top, 10)
-                    Text("Giá điểm cố định — không giảm giá giờ vàng")
+                    ForEach(partnerSections, id: \.brand.code) { section in
+                        sectionHeader(section.brand).padding(.top, 18)
+                        grid(section.rewards).padding(.top, 10)
+                    }
+                    Text("Điểm đổi từ vận động thật — giá cố định, không giảm giá giờ vàng")
                         .font(.viet(12.5)).foregroundStyle(Theme.faint)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .multilineTextAlignment(.center)
+                        .padding(.vertical, 14)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -44,7 +81,7 @@ struct RewardsView: View {
                 if reward.isVoucher, let redemption {
                     app.screen = .voucher(redemption)
                 } else if redemption != nil {
-                    app.showToast("Đã thêm vào ví — đưa mã cho thu ngân Guardian")
+                    app.showToast("Đã thêm vào ví — đưa mã khi nhận tại \(reward.brand.name)")
                 }
                 Task { await app.refresh() }
             } needsLink: {
@@ -124,33 +161,33 @@ struct RewardsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private var vouchers: [Reward] { app.catalog.filter(\.isVoucher) }
-    private var products: [Reward] { app.catalog.filter { !$0.isVoucher } }
-
-    private var voucherGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
-            ForEach(vouchers) { reward in
-                RewardCard(reward: reward, affordable: app.balance >= reward.costPoints) {
-                    redeeming = reward
-                }
-            }
+    /// Catalog grouped by partner (mobility ecosystem first, Guardian last),
+    /// each preserving the server's cost-ascending order.
+    private var partnerSections: [(brand: RewardBrand, rewards: [Reward])] {
+        RewardBrand.order.compactMap { code in
+            let items = app.catalog.filter { $0.partner == code }
+            return items.isEmpty ? nil : (RewardBrand.of(code), items)
         }
     }
 
-    private var productHeader: some View {
-        HStack {
-            HStack(spacing: 7) {
-                Image(systemName: "gift").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.purpleDeep)
-                Text("Sản phẩm Guardian").font(.viet(15, .bold))
+    private func sectionHeader(_ brand: RewardBrand) -> some View {
+        HStack(spacing: 9) {
+            Text(brand.mark)
+                .font(.viet(11, .heavy)).foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(brand.color)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(brand.name).font(.viet(15, .bold))
+                Text(brand.tagline).font(.viet(11.5)).foregroundStyle(Theme.muted)
             }
             Spacer()
-            Text("Nhận tại quầy").font(.viet(12)).foregroundStyle(Theme.muted)
         }
     }
 
-    private var productGrid: some View {
+    private func grid(_ rewards: [Reward]) -> some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
-            ForEach(products) { reward in
+            ForEach(rewards) { reward in
                 RewardCard(reward: reward, affordable: app.balance >= reward.costPoints) {
                     redeeming = reward
                 }
@@ -215,19 +252,51 @@ struct RewardCard: View {
         if reward.isVoucher {
             TicketArt(reward: reward)
         } else {
+            let brand = reward.brand
             ZStack {
-                RoundedRectangle(cornerRadius: 14).fill(Theme.purpleBg)
-                Image(systemName: "sparkles").font(.system(size: 30)).foregroundStyle(Theme.purpleMid)
+                RoundedRectangle(cornerRadius: 14).fill(brand.color.opacity(0.14))
+                Image(systemName: Self.icon(for: reward))
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(brand.color)
             }
             .frame(height: 70)
         }
     }
+
+    /// Pick a fitting SF Symbol from the reward title/description. Order
+    /// matters — check the specific "what it is" cues before incidental
+    /// keywords (e.g. "ăn Tết" in a VETC top-up must not read as food).
+    private static func icon(for reward: Reward) -> String {
+        let t = reward.title.lowercased()
+        let d = (t + " " + (reward.description ?? "")).lowercased()
+        // Wallet / account top-ups (decided by TITLE, not the blurb).
+        if t.contains("nạp ví") || t.contains("t-money") { return "creditcard.fill" }
+        if t.contains("vé tháng") || t.contains("vé năm") || t.contains("qua trạm")
+            || t.contains("làn ưu tiên") { return "road.lanes" }
+        if t.contains("thuê xe") || t.contains("tự lái") || t.contains("tài xế")
+            || t.contains("đưa đón") || t.contains("đặt xe") { return "car.fill" }
+        if d.contains("sạc") { return "bolt.car.fill" }
+        if t.contains("xăng") { return "fuelpump.fill" }
+        if t.contains("rửa xe") { return "sparkles" }
+        if t.contains("dầu") || t.contains("bảo dưỡng") || t.contains("lốp")
+            || t.contains("khám xe") { return "wrench.and.screwdriver.fill" }
+        if t.contains("đỗ xe") || t.contains("bãi đỗ") || t.contains("parking") { return "parkingsign" }
+        if t.contains("cà phê") || t.contains("đồ ăn") || t.contains("suất ăn")
+            || t.contains("combo") || t.contains("nghỉ chân") { return "cup.and.saucer.fill" }
+        if t.contains("bảo hiểm") { return "checkmark.shield.fill" }
+        if t.contains("cây") || t.contains("trồng") { return "leaf.fill" }
+        if t.contains("sticker") || t.contains("bình") || t.contains("áo") { return "bag.fill" }
+        return "gift.fill"
+    }
 }
 
-/// Perforated voucher-ticket artwork with the Guardian mark.
+/// Perforated voucher-ticket artwork, coloured + marked by the partner brand.
 struct TicketArt: View {
     let reward: Reward
 
+    private var brand: RewardBrand { reward.brand }
+
+    /// Denomination pulled from the title ("…50.000đ" → "50K"), else the mark.
     private var denomination: String {
         if let range = reward.title.range(of: #"(\d+)[.,]000"#, options: .regularExpression) {
             let digits = reward.title[range].prefix(while: { $0.isNumber })
@@ -238,26 +307,26 @@ struct TicketArt: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 14)
-                .fill(denomination == "50K" ? Theme.orangeBg : Theme.greenBgSoft)
+            RoundedRectangle(cornerRadius: 14).fill(brand.color.opacity(0.15))
             GeometryReader { geo in
-                let x = geo.size.width * 0.58
+                let x = geo.size.width * 0.56
                 Circle().fill(Theme.card).frame(width: 16, height: 16).position(x: x, y: 0)
                 Circle().fill(Theme.card).frame(width: 16, height: 16).position(x: x, y: geo.size.height)
                 Path { p in
                     p.move(to: .init(x: x, y: 10))
                     p.addLine(to: .init(x: x, y: geo.size.height - 10))
                 }
-                .stroke(Theme.orangeDeep.opacity(0.3), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
+                .stroke(brand.color.opacity(0.35), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
                 Text(denomination)
                     .font(.viet(21, .heavy))
-                    .foregroundStyle(denomination == "50K" ? Theme.orangeDeep : Theme.greenDeep)
-                    .position(x: geo.size.width * 0.28, y: geo.size.height / 2)
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Theme.guardian)
-                    .frame(width: 26, height: 26)
-                    .overlay { Text("G").font(.system(size: 13, weight: .heavy)).foregroundStyle(.white) }
-                    .position(x: geo.size.width * 0.82, y: geo.size.height / 2)
+                    .foregroundStyle(brand.color)
+                    .position(x: geo.size.width * 0.27, y: geo.size.height / 2)
+                Text(brand.mark)
+                    .font(.viet(10, .heavy)).foregroundStyle(.white)
+                    .padding(.horizontal, 7).padding(.vertical, 4)
+                    .background(brand.color)
+                    .clipShape(Capsule())
+                    .position(x: geo.size.width * 0.79, y: geo.size.height / 2)
             }
         }
         .frame(height: 70)
@@ -331,9 +400,10 @@ struct RedeemSheet: View {
     }
 
     private var note: String {
-        reward.isVoucher
-            ? "Không thể hoàn tác sau khi đổi. Voucher có giá trị 90 ngày, dùng một lần tại quầy Guardian."
-            : "Nhận sản phẩm tại quầy Guardian — đưa mã trong ví cho thu ngân. Không hoàn tác sau khi đổi."
+        let at = reward.brand.name
+        return reward.isVoucher
+            ? "Không thể hoàn tác. Voucher giá trị 90 ngày, dùng một lần qua \(at)."
+            : "Nhận tại \(at) — đưa mã trong ví. Không hoàn tác sau khi đổi."
     }
 
     private func row(_ label: String, _ value: String, color: Color, bold: Bool = false) -> some View {

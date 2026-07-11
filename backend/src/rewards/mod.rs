@@ -85,17 +85,29 @@ async fn redeem(
         return Ok(Json(existing));
     }
 
-    // Guardian rewards require a linked Hội Cam membership — that link IS the
-    // B2B2C product story.
-    let member_id: Option<String> =
-        sqlx::query_scalar("SELECT guardian_member_id FROM users WHERE id = $1")
-            .bind(user.user_id)
-            .fetch_one(&state.db)
+    // Only GUARDIAN rewards require a linked Hội Cam membership (that link IS
+    // the B2B2C story). Tasco/VETC ecosystem rewards redeem straight from the
+    // user's activity points. Pre-check read-only so we never decrement stock
+    // and then reject.
+    let reward_partner: Option<String> =
+        sqlx::query_scalar("SELECT partner FROM rewards WHERE id = $1 AND active")
+            .bind(reward_id)
+            .fetch_optional(&state.db)
             .await?;
-    if member_id.is_none() {
-        return Err(AppError::BadRequest(
-            "link your Guardian membership before redeeming".into(),
-        ));
+    let Some(reward_partner) = reward_partner else {
+        return Err(AppError::NotFound);
+    };
+    if partner::Adapter::requires_guardian_link(&reward_partner) {
+        let member_id: Option<String> =
+            sqlx::query_scalar("SELECT guardian_member_id FROM users WHERE id = $1")
+                .bind(user.user_id)
+                .fetch_one(&state.db)
+                .await?;
+        if member_id.is_none() {
+            return Err(AppError::BadRequest(
+                "link your Guardian membership before redeeming".into(),
+            ));
+        }
     }
 
     let redemption_id = Uuid::new_v4();
