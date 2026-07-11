@@ -247,90 +247,28 @@ struct RewardCard: View {
         .shadow(color: Theme.cardShadow, radius: 5, y: 2)
     }
 
-    @ViewBuilder
     private var artwork: some View {
-        if reward.isVoucher {
-            TicketArt(reward: reward)
-        } else {
-            let brand = reward.brand
-            ZStack {
-                RoundedRectangle(cornerRadius: 14).fill(brand.color.opacity(0.14))
-                Image(systemName: Self.icon(for: reward))
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(brand.color)
-            }
-            .frame(height: 70)
-        }
-    }
-
-    /// Pick a fitting SF Symbol from the reward title/description. Order
-    /// matters — check the specific "what it is" cues before incidental
-    /// keywords (e.g. "ăn Tết" in a VETC top-up must not read as food).
-    private static func icon(for reward: Reward) -> String {
-        let t = reward.title.lowercased()
-        let d = (t + " " + (reward.description ?? "")).lowercased()
-        // Wallet / account top-ups (decided by TITLE, not the blurb).
-        if t.contains("nạp ví") || t.contains("t-money") { return "creditcard.fill" }
-        if t.contains("vé tháng") || t.contains("vé năm") || t.contains("qua trạm")
-            || t.contains("làn ưu tiên") { return "road.lanes" }
-        if t.contains("thuê xe") || t.contains("tự lái") || t.contains("tài xế")
-            || t.contains("đưa đón") || t.contains("đặt xe") { return "car.fill" }
-        if d.contains("sạc") { return "bolt.car.fill" }
-        if t.contains("xăng") { return "fuelpump.fill" }
-        if t.contains("rửa xe") { return "sparkles" }
-        if t.contains("dầu") || t.contains("bảo dưỡng") || t.contains("lốp")
-            || t.contains("khám xe") { return "wrench.and.screwdriver.fill" }
-        if t.contains("đỗ xe") || t.contains("bãi đỗ") || t.contains("parking") { return "parkingsign" }
-        if t.contains("cà phê") || t.contains("đồ ăn") || t.contains("suất ăn")
-            || t.contains("combo") || t.contains("nghỉ chân") { return "cup.and.saucer.fill" }
-        if t.contains("bảo hiểm") { return "checkmark.shield.fill" }
-        if t.contains("cây") || t.contains("trồng") { return "leaf.fill" }
-        if t.contains("sticker") || t.contains("bình") || t.contains("áo") { return "bag.fill" }
-        return "gift.fill"
-    }
-}
-
-/// Perforated voucher-ticket artwork, coloured + marked by the partner brand.
-struct TicketArt: View {
-    let reward: Reward
-
-    private var brand: RewardBrand { reward.brand }
-
-    /// Denomination pulled from the title ("…50.000đ" → "50K"), else the mark.
-    private var denomination: String {
-        if let range = reward.title.range(of: #"(\d+)[.,]000"#, options: .regularExpression) {
-            let digits = reward.title[range].prefix(while: { $0.isNumber })
-            return "\(digits)K"
-        }
-        return "★"
-    }
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14).fill(brand.color.opacity(0.15))
-            GeometryReader { geo in
-                let x = geo.size.width * 0.56
-                Circle().fill(Theme.card).frame(width: 16, height: 16).position(x: x, y: 0)
-                Circle().fill(Theme.card).frame(width: 16, height: 16).position(x: x, y: geo.size.height)
-                Path { p in
-                    p.move(to: .init(x: x, y: 10))
-                    p.addLine(to: .init(x: x, y: geo.size.height - 10))
+        RewardArt(reward: reward)
+            .overlay(alignment: .topTrailing) {
+                if let denom = Self.denomination(reward.title) {
+                    Text(denom)
+                        .font(.mono(11, .heavy)).foregroundStyle(.white)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(reward.brand.color)
+                        .clipShape(Capsule())
+                        .padding(6)
                 }
-                .stroke(brand.color.opacity(0.35), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
-                Text(denomination)
-                    .font(.viet(21, .heavy))
-                    .foregroundStyle(brand.color)
-                    .position(x: geo.size.width * 0.27, y: geo.size.height / 2)
-                Text(brand.mark)
-                    .font(.viet(10, .heavy)).foregroundStyle(.white)
-                    .padding(.horizontal, 7).padding(.vertical, 4)
-                    .background(brand.color)
-                    .clipShape(Capsule())
-                    .position(x: geo.size.width * 0.79, y: geo.size.height / 2)
             }
+    }
+
+    /// A voucher denomination badge ("…50.000đ" → "50K"), nil if the title
+    /// carries no amount.
+    static func denomination(_ title: String) -> String? {
+        guard let range = title.range(of: #"(\d+)[.,]000"#, options: .regularExpression) else {
+            return nil
         }
-        .frame(height: 70)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        let digits = title[range].prefix(while: { $0.isNumber })
+        return "\(digits)K"
     }
 }
 
