@@ -114,6 +114,10 @@ final class APIClient {
         try await send("GET", "/v1/me/points")
     }
 
+    func coachInsight() async throws -> CoachInsight {
+        try await send("GET", "/v1/me/insight")
+    }
+
     func challenges() async throws -> [ChallengeItem] {
         try await send("GET", "/v1/challenges")
     }

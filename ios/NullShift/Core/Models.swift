@@ -39,6 +39,14 @@ struct MePoints: Codable {
     let xpPerLevel: Int
 }
 
+/// AI coach nudge — server phrases the user's REAL weekly stats (or a
+/// deterministic template when no AI key). `ai` flags which produced it.
+struct CoachInsight: Codable {
+    let ai: Bool
+    let headline: String
+    let body: String
+}
+
 struct GameStatus: Codable, Identifiable {
     let code: String
     let title: String

@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::{auth::jwt::AuthUser, error::AppError, state::AppState};
+use crate::{ai, auth::jwt::AuthUser, error::AppError, state::AppState};
 
 const LEAGUE_BUCKET_SIZE: i64 = 50;
 const WEEKLY_KEY_TTL_SECS: i64 = 21 * 86_400;
@@ -22,6 +22,7 @@ const WEEKLY_KEY_TTL_SECS: i64 = 21 * 86_400;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me/points", get(my_points))
+        .route("/me/insight", get(my_insight))
         .route("/leaderboard/weekly", get(weekly_leaderboard))
         .route("/league", get(my_league))
         .route("/challenges", get(list_challenges))
@@ -330,6 +331,146 @@ async fn my_points(user: AuthUser, State(state): State<AppState>) -> Result<Json
         "xp_in_level": lifetime_earned % 120,
         "xp_per_level": 120,
     })))
+}
+
+/// AI coach — a short, personalized nudge phrased from the user's REAL
+/// activity numbers. Same locked architecture as the VETC AI: the model only
+/// PHRASES the provided stats (never invents a figure) and the endpoint falls
+/// back to a deterministic template when no key is set — the demo never dies
+/// on a missing credential. Guardrail #4: the coach talks about ACTIVITY and
+/// CONSISTENCY only — never body/weight, never "less = better". It mints
+/// nothing (economy firewall): this is copy, not currency.
+async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+    let me: MeRow = sqlx::query_as(
+        "SELECT points_balance, streak_current, streak_best, weekly_goal_km, display_name
+         FROM users WHERE id = $1",
+    )
+    .bind(user.user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let weekly_km: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(distance_m), 0)::float8 / 1000.0 FROM activity_sessions
+         WHERE user_id = $1 AND status = 'completed' AND verdict = 'clean' AND started_at >= $2",
+    )
+    .bind(user.user_id)
+    .bind(rules::vn_week_start_utc())
+    .fetch_one(&state.db)
+    .await?;
+    let season = rules::current_season();
+    let season_earned: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount), 0)::bigint FROM points_ledger
+         WHERE user_id = $1 AND season = $2 AND amount > 0",
+    )
+    .bind(user.user_id)
+    .bind(&season)
+    .fetch_one(&state.db)
+    .await?;
+    let today_earned: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount), 0)::bigint FROM points_ledger
+         WHERE user_id = $1 AND amount > 0 AND created_at >= $2",
+    )
+    .bind(user.user_id)
+    .bind(rules::vn_day_start_utc())
+    .fetch_one(&state.db)
+    .await?;
+    let (tier, _next) = rules::tier(season_earned);
+
+    let name = me.display_name.clone().unwrap_or_default();
+    let goal = me.weekly_goal_km.max(1.0);
+    let remaining = (goal - weekly_km).max(0.0);
+    let pct = ((weekly_km / goal) * 100.0).round() as i64;
+
+    // Compact, factual stat block for the model to phrase (never invent).
+    let stats = json!({
+        "ten": name,
+        "km_tuan": (weekly_km * 10.0).round() / 10.0,
+        "muc_tieu_km_tuan": (goal * 10.0).round() / 10.0,
+        "phan_tram_muc_tieu": pct,
+        "chuoi_ngay": me.streak_current,
+        "diem_hom_nay": today_earned,
+        "hang": tier,
+    });
+
+    if let Some(config) = ai::AiConfig::from_env() {
+        let system = "Bạn là huấn luyện viên chạy bộ thân thiện trong app Null Run. Viết một lời \
+            động viên NGẮN bằng tiếng Việt, CHỈ dựa trên số liệu THẬT được cung cấp — tuyệt đối \
+            không bịa thêm bất kỳ con số nào. Chỉ nói về VẬN ĐỘNG, sự đều đặn, chuỗi ngày và mục \
+            tiêu tuần. TUYỆT ĐỐI không nhắc tới cân nặng/giảm cân/hình thể, không hàm ý 'ít hơn là \
+            tốt hơn'. Giọng ấm áp, khích lệ, có thể dùng 1 emoji. \
+            Trả về JSON: {\"headline\": \"...(<=48 ký tự)\", \"body\": \"...(<=140 ký tự)\"}";
+        let user_msg = format!("Số liệu tuần này của người dùng: {stats}");
+        match ai::chat(&config, system, &user_msg, true).await {
+            Ok(raw) => {
+                if let Some(parsed) = ai::parse_json(&raw) {
+                    if parsed["headline"].is_string() && parsed["body"].is_string() {
+                        return Ok(Json(json!({
+                            "ai": true,
+                            "headline": parsed["headline"],
+                            "body": parsed["body"],
+                            "stats": stats,
+                        })));
+                    }
+                }
+            }
+            Err(e) => tracing::error!(error = %e, "me insight ai failed, falling back"),
+        }
+    }
+
+    // Deterministic template — the demo never dies on a missing key.
+    let (headline, body) =
+        insight_template(&name, weekly_km, goal, remaining, pct, me.streak_current);
+    Ok(Json(json!({
+        "ai": false,
+        "headline": headline,
+        "body": body,
+        "stats": stats,
+    })))
+}
+
+/// Encouraging VN coach copy from real numbers — activity/consistency only,
+/// never body/weight (guardrail #4).
+fn insight_template(
+    name: &str,
+    weekly_km: f64,
+    goal: f64,
+    remaining: f64,
+    pct: i64,
+    streak: i32,
+) -> (String, String) {
+    let hi = if name.is_empty() {
+        "Chào bạn".to_string()
+    } else {
+        format!("Chào {name}")
+    };
+    let streak_tail = if streak >= 2 {
+        format!(" Chuỗi {streak} ngày đang cháy 🔥 giữ nhịp nhé!")
+    } else {
+        String::new()
+    };
+    if weekly_km <= 0.01 {
+        (
+            "Bắt đầu tuần mới thôi! 🌱".into(),
+            format!(
+                "{hi}! Tuần này mục tiêu {goal:.0} km. Một buổi đi bộ nhẹ là khởi động đẹp rồi.{streak_tail}"
+            ),
+        )
+    } else if remaining <= 0.01 {
+        (
+            "Đạt mục tiêu tuần! 🎉".into(),
+            format!(
+                "{hi}! Bạn đã hoàn thành {weekly_km:.1} km tuần này — chạm mốc rồi. Quá tuyệt!{streak_tail}"
+            ),
+        )
+    } else {
+        (
+            format!("Đã {pct}% mục tiêu tuần"),
+            format!(
+                "{hi}! Bạn đi được {weekly_km:.1}/{goal:.0} km, còn {remaining:.1} km nữa là chạm mốc.{streak_tail}"
+            ),
+        )
+    }
 }
 
 #[derive(Serialize)]

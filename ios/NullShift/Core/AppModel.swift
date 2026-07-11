@@ -48,6 +48,7 @@ enum Screen: Equatable {
 final class AppModel: ObservableObject {
     @Published var screen: Screen = .home
     @Published var points: MePoints?
+    @Published var coach: CoachInsight?
     @Published var quests: [QuestStatus] = []
     @Published var wheel: WheelState?
     @Published var catalog: [Reward] = []
@@ -133,7 +134,9 @@ final class AppModel: ObservableObject {
         async let gu: GuildState? = try? APIClient.shared.myGuild()
         async let rc: [RaceWindow]? = try? APIClient.shared.races()
         async let s: [ActivitySession]? = try? APIClient.shared.sessions()
+        async let ci: CoachInsight? = try? APIClient.shared.coachInsight()
         points = await p
+        coach = await ci
         quests = await q ?? []
         wheel = await wh
         catalog = await r ?? []
@@ -151,6 +154,12 @@ final class AppModel: ObservableObject {
         }
 
         detectCelebrations()
+    }
+
+    /// Re-fetch just the AI coach nudge (tap-to-regenerate on Home). With an
+    /// AI key set, each call rephrases the same real stats afresh.
+    func reloadCoach() async {
+        if let c = try? await APIClient.shared.coachInsight() { coach = c }
     }
 
     /// Compares tier/level/streak against the last-seen values and queues at

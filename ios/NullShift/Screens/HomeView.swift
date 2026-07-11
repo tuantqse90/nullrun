@@ -11,13 +11,14 @@ struct HomeView: View {
                 VStack(spacing: 13) {
                     header.riseIn(0)
                     weeklyGoalCard.riseIn(1)
-                    statGrid.riseIn(2)
-                    leagueCard.riseIn(3)
-                    levelCard.riseIn(4)
-                    questsCard.riseIn(5)
-                    gamesCard.riseIn(6)
-                    critterCard.riseIn(7)
-                    wheelBanner.riseIn(8)
+                    coachCard.riseIn(2)
+                    statGrid.riseIn(3)
+                    leagueCard.riseIn(4)
+                    levelCard.riseIn(5)
+                    questsCard.riseIn(6)
+                    gamesCard.riseIn(7)
+                    critterCard.riseIn(8)
+                    wheelBanner.riseIn(9)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -157,6 +158,45 @@ struct HomeView: View {
         guard let league = app.league, league.joined, let standings = league.standings,
               let mine = standings.first(where: { $0.isMe }) else { return "chưa xếp hạng" }
         return "hạng \(mine.rank)/\(standings.count)"
+    }
+
+    /// AI coach nudge — phrased by the server from the user's real weekly
+    /// numbers (or a template when no AI key). Tap to regenerate. Purely
+    /// motivational copy; it never mints points (economy firewall).
+    @ViewBuilder private var coachCard: some View {
+        if let coach = app.coach {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle().fill(Theme.purpleBg)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+                }
+                .frame(width: 38, height: 38)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(coach.headline)
+                            .font(.viet(14, .bold)).foregroundStyle(Theme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        if coach.ai {
+                            Text("AI").font(.mono(9, .bold)).foregroundStyle(Theme.purpleDeep)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Theme.purpleBg).clipShape(Capsule())
+                        }
+                    }
+                    Text(coach.body)
+                        .font(.viet(12.5)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .card()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                Haptics.light()
+                Task { await app.reloadCoach() }
+            }
+        }
     }
 
     private var levelCard: some View {
