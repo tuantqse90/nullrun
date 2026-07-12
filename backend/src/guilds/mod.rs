@@ -64,7 +64,9 @@ async fn create(
 ) -> Result<Json<Value>, AppError> {
     let name = body.name.trim().to_string();
     if !(3..=30).contains(&name.chars().count()) {
-        return Err(AppError::BadRequest("tên hội phải từ 3 đến 30 ký tự".into()));
+        return Err(AppError::BadRequest(
+            "tên hội phải từ 3 đến 30 ký tự".into(),
+        ));
     }
     let emblem = body.emblem.unwrap_or_else(|| "🦔".into());
     if emblem.chars().count() > 4 {
@@ -143,12 +145,11 @@ async fn join_by_code(
     State(state): State<AppState>,
     Json(body): Json<JoinByCode>,
 ) -> Result<Json<Value>, AppError> {
-    let guild: Option<Guild> = sqlx::query_as(&format!(
-        "SELECT {GUILD_COLS} FROM guilds WHERE code = $1"
-    ))
-    .bind(body.code.trim().to_uppercase())
-    .fetch_optional(&state.db)
-    .await?;
+    let guild: Option<Guild> =
+        sqlx::query_as(&format!("SELECT {GUILD_COLS} FROM guilds WHERE code = $1"))
+            .bind(body.code.trim().to_uppercase())
+            .fetch_optional(&state.db)
+            .await?;
     let guild = guild.ok_or(AppError::BadRequest("mã hội không đúng".into()))?;
     join(&state, guild, user.user_id).await.map(Json)
 }
@@ -158,12 +159,11 @@ async fn join_by_id(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, AppError> {
-    let guild: Option<Guild> = sqlx::query_as(&format!(
-        "SELECT {GUILD_COLS} FROM guilds WHERE id = $1"
-    ))
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?;
+    let guild: Option<Guild> =
+        sqlx::query_as(&format!("SELECT {GUILD_COLS} FROM guilds WHERE id = $1"))
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?;
     let guild = guild.ok_or(AppError::NotFound)?;
     join(&state, guild, user.user_id).await.map(Json)
 }
@@ -366,10 +366,7 @@ async fn render(state: &AppState, guild: Guild, me: Uuid) -> Result<Value, AppEr
         .into_iter()
         .map(|r| MemberView {
             display_name: r.display_name.clone().unwrap_or_else(|| {
-                format!(
-                    "Runner •••{}",
-                    &r.phone[r.phone.len().saturating_sub(3)..]
-                )
+                format!("Runner •••{}", &r.phone[r.phone.len().saturating_sub(3)..])
             }),
             contribution_pct: if r.weekly_goal_km > 0.0 {
                 (r.weekly_km / r.weekly_goal_km).min(1.0)
@@ -476,11 +473,19 @@ fn eval(def: &GuildQuestDef, stats: &WindowStats, member_count: i64) -> (f64, f6
     let members = member_count.max(1) as f64;
     match def.metric.as_str() {
         "sessions" => (
-            if def.per_member { def.target * members } else { def.target },
+            if def.per_member {
+                def.target * members
+            } else {
+                def.target
+            },
             stats.sessions as f64,
         ),
         "distance_m" => (
-            if def.per_member { def.target * members } else { def.target },
+            if def.per_member {
+                def.target * members
+            } else {
+                def.target
+            },
             stats.distance_m,
         ),
         // target stored as a fraction of members (0..1)
@@ -516,7 +521,11 @@ async fn settle(state: &AppState, guild_id: Uuid) -> Result<i64, AppError> {
     let mut tx = state.db.begin().await?;
     let mut minted = 0i64;
     for def in &defs {
-        let stats = if def.cadence == "weekly" { &weekly } else { &daily };
+        let stats = if def.cadence == "weekly" {
+            &weekly
+        } else {
+            &daily
+        };
         let (target, progress) = eval(def, stats, member_count);
         if progress < target {
             continue;
@@ -556,7 +565,11 @@ async fn quest_board(
 
     let mut out = Vec::with_capacity(defs.len());
     for def in defs {
-        let stats = if def.cadence == "weekly" { &weekly } else { &daily };
+        let stats = if def.cadence == "weekly" {
+            &weekly
+        } else {
+            &daily
+        };
         let (target, progress) = eval(&def, stats, member_count);
         let paid: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM guild_xp_ledger WHERE guild_id = $1 AND source_id = $2)",
@@ -599,10 +612,7 @@ pub async fn on_activity(state: &AppState, user_id: Uuid) {
 /// Active guilds only — a guild with zero clean sessions in the last 7 days
 /// is invisible unless it was created in the last 7 days (grace period).
 /// The design forbids surfacing dead guilds to newcomers.
-async fn discover(
-    _user: AuthUser,
-    State(state): State<AppState>,
-) -> Result<Json<Value>, AppError> {
+async fn discover(_user: AuthUser, State(state): State<AppState>) -> Result<Json<Value>, AppError> {
     #[derive(sqlx::FromRow, Serialize)]
     struct Row {
         id: Uuid,

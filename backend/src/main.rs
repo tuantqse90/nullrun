@@ -1,12 +1,12 @@
 mod activities;
 mod admin;
+mod ai;
 mod auth;
 mod config;
 mod devices;
 mod duels;
 mod error;
 mod gamification;
-mod ai;
 mod guilds;
 mod mobility;
 mod races;

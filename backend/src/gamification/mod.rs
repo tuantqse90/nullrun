@@ -409,7 +409,10 @@ async fn coach_context(state: &AppState, user_id: Uuid) -> Result<CoachCtx, AppE
 /// on a missing credential. Guardrail #4: the coach talks about ACTIVITY and
 /// CONSISTENCY only — never body/weight, never "less = better". It mints
 /// nothing (economy firewall): this is copy, not currency.
-async fn my_insight(user: AuthUser, State(state): State<AppState>) -> Result<Json<Value>, AppError> {
+async fn my_insight(
+    user: AuthUser,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, AppError> {
     let c = coach_context(&state, user.user_id).await?;
 
     if let Some(config) = ai::AiConfig::from_env() {
@@ -556,7 +559,9 @@ async fn coach_chat(
         }
     }
     if body.messages.last().map(|m| m.role.as_str()) != Some("user") {
-        return Err(AppError::BadRequest("last message must be from user".into()));
+        return Err(AppError::BadRequest(
+            "last message must be from user".into(),
+        ));
     }
 
     // Per-user hourly cap — AI calls cost money; keep a script from draining it.

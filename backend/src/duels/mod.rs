@@ -209,39 +209,38 @@ async fn render(state: &AppState, duel: Duel, me: Uuid) -> Result<Value, AppErro
         .fetch_optional(&state.db)
         .await?;
 
-        let (distance, crossed_at) =
-            if let Some((session_id, status, verdict)) = &session {
-                let points: Vec<compute::Point> = sqlx::query_as(
-                    "SELECT recorded_at, lat, lon, horizontal_accuracy_m
+        let (distance, crossed_at) = if let Some((session_id, status, verdict)) = &session {
+            let points: Vec<compute::Point> = sqlx::query_as(
+                "SELECT recorded_at, lat, lon, horizontal_accuracy_m
                      FROM gps_points WHERE session_id = $1 ORDER BY recorded_at",
-                )
-                .bind(session_id)
-                .fetch_all(&state.db)
-                .await?;
-                let stats = compute::session_stats(&points);
-                let crossed = compute::crossing_time(&points, duel.target_m);
-                // A session is TERMINAL once finished/discarded; only a
-                // completed+clean crossing is eligible to win. A rejected or
-                // discarded session is terminal-but-excluded (fraud never
-                // mints), and an active crosser is still pending.
-                let is_terminal = status == "completed" || status == "discarded";
-                let eligible = status == "completed" && verdict == "clean";
-                settle_times.push(Crossing {
-                    crossed_at: crossed,
-                    terminal: is_terminal,
-                    eligible,
-                });
-                (stats.distance_m, crossed)
-            } else {
-                // No session yet — treat as a pending (non-terminal) player so
-                // we don't settle before both have raced.
-                settle_times.push(Crossing {
-                    crossed_at: None,
-                    terminal: false,
-                    eligible: false,
-                });
-                (0.0, None)
-            };
+            )
+            .bind(session_id)
+            .fetch_all(&state.db)
+            .await?;
+            let stats = compute::session_stats(&points);
+            let crossed = compute::crossing_time(&points, duel.target_m);
+            // A session is TERMINAL once finished/discarded; only a
+            // completed+clean crossing is eligible to win. A rejected or
+            // discarded session is terminal-but-excluded (fraud never
+            // mints), and an active crosser is still pending.
+            let is_terminal = status == "completed" || status == "discarded";
+            let eligible = status == "completed" && verdict == "clean";
+            settle_times.push(Crossing {
+                crossed_at: crossed,
+                terminal: is_terminal,
+                eligible,
+            });
+            (stats.distance_m, crossed)
+        } else {
+            // No session yet — treat as a pending (non-terminal) player so
+            // we don't settle before both have raced.
+            settle_times.push(Crossing {
+                crossed_at: None,
+                terminal: false,
+                eligible: false,
+            });
+            (0.0, None)
+        };
 
         players.push(PlayerState {
             user_id: pid,
@@ -262,13 +261,19 @@ async fn render(state: &AppState, duel: Duel, me: Uuid) -> Result<Value, AppErro
         let earliest_eligible = players
             .iter()
             .zip(&settle_times)
-            .filter_map(|(p, c)| if c.eligible { c.crossed_at.map(|t| (p.user_id, t)) } else { None })
+            .filter_map(|(p, c)| {
+                if c.eligible {
+                    c.crossed_at.map(|t| (p.user_id, t))
+                } else {
+                    None
+                }
+            })
             .min_by_key(|(_, t)| *t);
         // Is anyone still pending (crossed but not terminal) who could beat it?
         let pending_earlier = |cut: DateTime<Utc>| {
-            settle_times.iter().any(|c| {
-                !c.terminal && c.crossed_at.map(|t| t <= cut).unwrap_or(false)
-            })
+            settle_times
+                .iter()
+                .any(|c| !c.terminal && c.crossed_at.map(|t| t <= cut).unwrap_or(false))
         };
         let winner = match earliest_eligible {
             Some((wid, t)) if !pending_earlier(t) => Some((wid, t)),
