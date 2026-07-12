@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<title>Null Run — Pitch Deck</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+<style>
+:root{
+  --page:#FFFFFF;
+  --ink:#37352F;
+  --dim:#787774;
+  --faint:#A8A6A0;
+  --line:#E9E9E7;
+  --callout:#F1F1EF;
+  --letterbox:#191919;
+}
+html,body{margin:0;padding:0;background:var(--letterbox);color-scheme:light;}
+*{box-sizing:border-box;}
+
+#wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--letterbox);overflow:hidden;}
+#stage{position:relative;width:1280px;height:720px;background:var(--page);color:var(--ink);flex:none;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;}
+
+.slide{position:absolute;inset:0;padding:56px 68px;display:none;flex-direction:column;}
+.slide.on{display:flex;}
+
+/* type */
+.crumb{font-size:13px;color:var(--faint);margin:0 0 28px;}
+.crumb span{color:var(--dim);}
+h1{font-size:48px;font-weight:700;letter-spacing:-.02em;line-height:1.15;margin:0 0 22px;text-wrap:balance;max-width:1020px;}
+h1 .dim{color:var(--dim);font-weight:700;}
+.rule{border:0;border-top:1px solid var(--line);margin:0 0 26px;}
+ul.blocks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:13px;max-width:960px;}
+ul.blocks li{font-size:20px;line-height:1.5;padding-left:24px;position:relative;}
+ul.blocks li::before{content:"•";position:absolute;left:6px;color:var(--ink);}
+ul.blocks b{font-weight:600;}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
+.callout{background:var(--callout);border-radius:4px;padding:15px 20px;font-size:16px;letter-spacing:.04em;color:var(--ink);width:fit-content;max-width:100%;}
+.callout .sep{color:var(--faint);padding:0 6px;}
+.label{font-size:16px;font-weight:600;color:var(--ink);margin:0 0 12px;}
+.small{font-size:16px;line-height:1.5;color:var(--dim);margin:0;}
+
+/* to-dos */
+.todo{display:flex;gap:11px;align-items:flex-start;font-size:18px;line-height:1.45;}
+.todo .box{width:17px;height:17px;border:1.5px solid var(--ink);border-radius:3px;flex:none;margin-top:3px;position:relative;background:var(--page);}
+.todo.done .box{background:var(--ink);}
+.todo.done .box::after{content:"";position:absolute;left:5px;top:1px;width:4px;height:9px;
+  border:solid var(--page);border-width:0 2px 2px 0;transform:rotate(45deg);}
+
+/* placeholders */
+.ph{border:1.5px dashed #D3D1CB;border-radius:3px;display:flex;align-items:center;justify-content:center;text-align:center;padding:10px;}
+.ph span{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);line-height:1.6;}
+
+#s1 ul.blocks{gap:20px;}
+#s1 .rule{margin-bottom:36px;}
+
+/* slide 2 */
+.s2-cols{display:flex;gap:56px;align-items:flex-start;}
+.s2-cols ul.blocks{flex:1;}
+.s2-phone{width:160px;height:330px;flex:none;}
+
+/* slide 3/4 spacing */
+.gap18{height:18px;flex:none;}
+.gap26{height:26px;flex:none;}
+
+/* slide 5 */
+.ship{display:flex;gap:34px;flex-wrap:wrap;}
+.team{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;}
+.member{display:flex;gap:14px;align-items:center;}
+.member .ph{width:78px;height:78px;flex:none;}
+.member h3{font-size:16px;font-weight:600;margin:0 0 2px;}
+.member p{font-size:13px;color:var(--dim);margin:0;line-height:1.4;}
+.s5-bottom{display:flex;gap:48px;align-items:flex-start;}
+.s5-bottom .asks{flex:1;display:flex;flex-direction:column;gap:10px;}
+.s5-qr{width:120px;flex:none;display:flex;flex-direction:column;gap:8px;}
+.s5-qr .ph{width:120px;height:120px;}
+.s5-qr p{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:0;text-align:center;}
+
+/* chrome */
+#hud{position:fixed;right:22px;bottom:16px;font-family:ui-monospace,Menlo,monospace;
+  font-size:12.5px;letter-spacing:.1em;color:#A8A6A0;user-select:none;}
+#hint{position:fixed;left:22px;bottom:16px;font-family:ui-monospace,Menlo,monospace;
+  font-size:12.5px;letter-spacing:.1em;color:#5C5B55;user-select:none;}
+
+/* print: 1 slide per landscape page */
+@media print{
+  html,body{background:#fff;}
+  #wrap{position:static;display:block;overflow:visible;}
+  #stage{width:1280px;height:auto;transform:none !important;}
+  .slide{display:flex;position:relative;inset:auto;width:1280px;height:720px;page-break-after:always;break-after:page;}
+  .slide:last-of-type{page-break-after:auto;break-after:auto;}
+  .callout,.todo .box,.todo.done .box{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  #hud,#hint{display:none;}
+  @page{size:1280px 720px;margin:0;}
+}
+</style>
+
+<div id="wrap">
+  <div id="stage">
+
+    <!-- 1 · PROBLEM -->
+    <section class="slide" id="s1">
+      <p class="crumb">Null Run / Pitch / <span>01 — Problem</span></p>
+      <h1><span class="dim">Companies want to reward healthy behavior.</span><br>Nobody can prove it's real.</h1>
+      <hr class="rule">
+      <ul class="blocks">
+        <li>The Vitality model works in dozens of markets. AIA already brought it to Vietnam. <b>Demand is proven.</b></li>
+        <li>But that's one insurer's closed program. Retail, banks, mobility have <b>no neutral layer to plug into.</b></li>
+        <li>Because step counters can be faked in five minutes. Shake your phone, earn rewards.</li>
+        <li>StepN paid tokens per step. Bots farmed it. The whole economy collapsed.</li>
+      </ul>
+    </section>
+
+    <!-- 2 · PRODUCT -->
+    <section class="slide" id="s2">
+      <p class="crumb">Null Run / Pitch / <span>02 — Product</span></p>
+      <h1>A running app where <br>points come with proof.</h1>
+      <hr class="rule">
+      <div class="s2-cols">
+        <ul class="blocks">
+          <li><b>Real runs only.</b> The app ships raw GPS; the server recomputes every distance and scores every run against 7 fraud signals.</li>
+          <li>The phone can't lie its way to a single point.</li>
+          <li>Retention through play: streaks, leagues, quests, 1v1 duels, guilds, a lucky wheel.</li>
+          <li>3D body scan runs <b>on-device</b>. Photos never leave the phone — exactly what insurers care about.</li>
+          <li><b>Live in production.</b> Not a prototype.</li>
+        </ul>
+        <div class="ph s2-phone"><span>Real app screenshot<br>run screen + map<br>goes here</span></div>
+      </div>
+    </section>
+
+    <!-- 3 · BUSINESS MODEL -->
+    <section class="slide" id="s3">
+      <p class="crumb">Null Run / Pitch / <span>03 — Business model</span></p>
+      <h1><span class="dim">Users run for free.</span> Partners pay.</h1>
+      <hr class="rule">
+      <ul class="blocks">
+        <li><b>B2B2C:</b> partners fund rewards for their own members. We charge per verified activity — and sell behavioral insights partners can't measure themselves.</li>
+        <li>[X] per verified activity + [Y] per user/month for insights. Partners already spend [Z] per voucher through channels they can't measure. Cheaper — and <b>every redemption is proven.</b></li>
+        <li>Points are loyalty only: soulbound, non-tradeable, no cash-out. No token, no speculative collapse.</li>
+        <li>Vietnam: 100M people. [N] mass-participation races a year; [race] sells out weeks ahead. Life insurers are starving for engagement tools.</li>
+      </ul>
+      <div class="gap26"></div>
+      <div class="callout mono">REAL RUN <span class="sep">→</span> VERIFIED <span class="sep">→</span> POINTS <span class="sep">→</span> REWARDS <span class="sep">·</span> PARTNER-FUNDED</div>
+    </section>
+
+    <!-- 4 · MOAT -->
+    <section class="slide" id="s4">
+      <p class="crumb">Null Run / Pitch / <span>04 — Why this is hard to copy</span></p>
+      <h1>Adding the second partner <br>costs almost nothing.</h1>
+      <hr class="rule">
+      <div class="callout mono">TOLL <span class="sep">/</span> TOP-UP <span class="sep">/</span> FUEL <span class="sep">/</span> PARKING <span class="sep">→</span> ADAPTER <span class="sep">→</span> IN-APP MISSIONS</div>
+      <div class="gap18"></div>
+      <ul class="blocks">
+        <li>Build the engine once; every event source is just input. <b>Proven at this hackathon:</b> a VETC event adapter went live — without touching the engine.</li>
+        <li>Missions reward <b>off-peak driving only</b> — never 6–9am or 4–7pm. No mission ever pays anyone to drive more or faster. Exactly Tasco's congestion problem.</li>
+        <li><b>Disciplined AI:</b> the backend computes every number; AI only does the words. Whitelisted missions, deterministic churn score. It cannot invent a number.</li>
+        <li>Strava sells social. UpRace is CSR step-counting with no fraud defense. Vitality is locked to one insurer.</li>
+        <li>The neutral layer is still empty — and the hard part (attestation, the fraud engine, on-device processing) <b>can't be copied in a week.</b></li>
+      </ul>
+    </section>
+
+    <!-- 5 · TEAM / ASK -->
+    <section class="slide" id="s5">
+      <p class="crumb">Null Run / Pitch / <span>05 — Team &amp; ask</span></p>
+      <h1><span class="dim">It's real and it's running.</span> [X] buys speed.</h1>
+      <hr class="rule">
+      <p class="label">Built by this team — live in production today</p>
+      <div class="ship">
+        <div class="todo done"><span class="box"></span><span>Rust backend</span></div>
+        <div class="todo done"><span class="box"></span><span>Native iOS app</span></div>
+        <div class="todo done"><span class="box"></span><span>Self-hosted map tiles</span></div>
+        <div class="todo done"><span class="box"></span><span>Partner console</span></div>
+      </div>
+      <p class="small" style="margin-top:12px;">Zero public users yet — that is exactly what this round buys.</p>
+      <div class="gap18"></div>
+      <p class="label">Team</p>
+      <div class="team">
+        <div class="member"><div class="ph"><span>Photo</span></div><div><h3>[Name]</h3><p>Founder · Product<br>[one line]</p></div></div>
+        <div class="member"><div class="ph"><span>Photo</span></div><div><h3>[Name]</h3><p>Backend · Rust<br>[one line]</p></div></div>
+        <div class="member"><div class="ph"><span>Photo</span></div><div><h3>[Name]</h3><p>iOS<br>[one line]</p></div></div>
+        <div class="member"><div class="ph"><span>Photo</span></div><div><h3>[Name]</h3><p>AI · Data<br>[one line]</p></div></div>
+      </div>
+      <div class="gap18"></div>
+      <div class="s5-bottom">
+        <div class="asks">
+          <p class="label" style="margin:0;">Ask: [X] · 12 months · three milestones</p>
+          <div class="todo"><span class="box"></span><span>Production-grade fraud defense, real SMS</span></div>
+          <div class="todo"><span class="box"></span><span>One paid pilot: retail partner + VETC</span></div>
+          <div class="todo"><span class="box"></span><span>10,000 beta users in HCMC/Hanoi, ≥[Y]% week-4 retention</span></div>
+          <p class="small" style="margin-top:4px;">Hit those three and the next round prices itself.</p>
+        </div>
+        <div class="s5-qr">
+          <div class="ph"><span>QR<br>live demo</span></div>
+          <p>Scan for live demo</p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<div id="hint">&#8592; &#8594; to navigate</div>
+<div id="hud">1 / 5</div>
+
+<script>
+(function(){
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var hud = document.getElementById('hud');
+  var stage = document.getElementById('stage');
+  var cur = 0;
+
+  function clamp(i){ return Math.max(0, Math.min(slides.length - 1, i)); }
+  var hint = document.getElementById('hint');
+  function show(i){
+    cur = clamp(i);
+    slides.forEach(function(s, k){ s.classList.toggle('on', k === cur); });
+    hud.textContent = (cur + 1) + ' / ' + slides.length;
+    hint.style.display = cur > 0 ? 'none' : '';
+    try { history.replaceState(null, '', '#' + (cur + 1)); } catch (e) {}
+  }
+  function fromHash(){
+    var n = parseInt((location.hash || '').replace('#',''), 10);
+    show(isNaN(n) ? 0 : n - 1);
+  }
+
+  function fit(){
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); show(cur + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); show(cur - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+
+  document.getElementById('wrap').addEventListener('click', function(e){
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (window.getSelection && String(window.getSelection())) return;
+    var x = e.clientX / window.innerWidth;
+    show(x < 0.3 ? cur - 1 : cur + 1);
+  });
+
+  var tx = null;
+  document.addEventListener('touchstart', function(e){ tx = e.touches[0].clientX; }, {passive:true});
+  document.addEventListener('touchend', function(e){
+    if (tx === null) return;
+    var dx = e.changedTouches[0].clientX - tx;
+    if (Math.abs(dx) > 40) show(dx < 0 ? cur + 1 : cur - 1);
+    tx = null;
+  }, {passive:true});
+
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+})();
+</script>
+
+</body>
+</html>
